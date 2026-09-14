@@ -141,7 +141,7 @@
   function preservedAttachmentExtensions(target) {
     return [...new Set(String(target?.preserveAttachmentExtensions ?? "")
       .toLowerCase()
-      .split(/[\\\s,;]+/)
+      .split(/[\\s,;]+/)
       .map(value => value.replace(/^\\.+/, "").trim())
       .filter(value => /^[a-z0-9]{1,12}$/.test(value)))];
   }
@@ -225,7 +225,7 @@
           attachmentMode === "preserve"
             ? "Any message containing matching uploaded or rendered media is kept intact, including its text."
             : "Only messages containing matching uploaded or rendered media are eligible for message deletion. GIF-picker links, Tenor/Giphy media, and direct rendered image/media links are included in preview, purge, and verification."
-       ),
+        ),
       ) : null,
     );
   }
@@ -243,6 +243,114 @@
     return out;
   }
 
+  function patchCheckpointStorage(source) {
+    let out = source;
+
+    const checkpointBlock = `  function purgeAccountId() {
+    try {
+      const store = find("getCurrentUser");
+      const id = store?.getCurrentUser?.()?.id;
+      return id ? String(id) : "";
+    } catch { return ""; }
+  }
+  function purgeJobMap() {
+    try {
+      const raw = storage.activePurgeJobs;
+      return raw && typeof raw === "object" && !Array.isArray(raw) ? clone(raw) : {};
+    } catch { return {}; }
+  }
+  function purgeJobComplete(job) {
+    const targets = Array.isArray(job?.spec?.targets) ? job.spec.targets : [];
+    if (!targets.length) return false;
+    const completed = new Set(Array.isArray(job?.completedKeys) ? job.completedKeys : []);
+    return targets.every(target => completed.has(target.key));
+  }
+  function writePurgeJobMap(map) {
+    storage.activePurgeJobs = clone(map ?? {});
+  }
+  function getSavedJob() {
+    try {
+      const accountId = purgeAccountId();
+      if (!accountId) return null;
+      const map = purgeJobMap();
+
+      // v1.1.4 and older stored a single unscoped checkpoint. It cannot be
+      // safely attributed after an account switch, so never auto-resume it.
+      const legacy = storage.activePurgeJob;
+      if (legacy) {
+        storage.activePurgeJob = null;
+        const legacyOwner = String(legacy?.accountId ?? "");
+        if (legacyOwner === accountId && legacy?.version === JOB_VERSION && legacy?.spec?.targets?.length && !purgeJobComplete(legacy)) {
+          map[accountId] = clone(legacy);
+          writePurgeJobMap(map);
+        }
+      }
+
+      const job = map[accountId];
+      const invalid = !job || job.version !== JOB_VERSION || !job.spec?.targets?.length || (job.accountId && String(job.accountId) !== accountId);
+      if (invalid || purgeJobComplete(job)) {
+        if (job) {
+          delete map[accountId];
+          writePurgeJobMap(map);
+          notify();
+        }
+        return null;
+      }
+      return clone(job);
+    } catch { return null; }
+  }
+  function saveJob(job) {
+    const currentId = purgeAccountId();
+    const ownerId = String(job?.accountId ?? currentId ?? "");
+    if (!currentId || !ownerId) throw new Error("Could not verify the Discord account for this purge checkpoint");
+    if (ownerId !== currentId) throw new Error("Discord account changed during purge; stopped before writing this checkpoint");
+    const map = purgeJobMap();
+    map[ownerId] = { ...clone(job), accountId: ownerId };
+    writePurgeJobMap(map);
+    try { storage.activePurgeJob = null; } catch {}
+    notify();
+  }
+  function clearSavedJob() {
+    try {
+      const accountId = purgeAccountId();
+      const map = purgeJobMap();
+      if (accountId && map[accountId]) {
+        delete map[accountId];
+        writePurgeJobMap(map);
+      }
+      storage.activePurgeJob = null;
+    } catch {}
+    notify();
+  }
+
+`;
+
+    out = replaceBlock(
+      out,
+      "  function getSavedJob() {",
+      "  function previewSignature(spec) {",
+      checkpointBlock,
+      "account-scoped purge checkpoints",
+    );
+
+    const oldSavedJob = `      saved = {
+        version: JOB_VERSION,
+        createdAt: Date.now(),`;
+    const newSavedJob = `      saved = {
+        version: JOB_VERSION,
+        accountId: purgeAccountId(),
+        createdAt: Date.now(),`;
+    if (!out.includes(oldSavedJob)) throw new Error("Could not patch Purge Tools checkpoint owner");
+    out = out.replace(oldSavedJob, newSavedJob);
+
+    const oldDiscard = '          React.createElement(Button, { text: "Discard saved job", danger: true, onPress: () => RN.Alert.alert("Discard saved purge?", "This removes the resume checkpoint. It does not restore anything already deleted.", [{ text: "Keep", style: "cancel" }, { text: "Discard", style: "destructive", onPress: clearSavedJob }]) }),';
+    const newDiscard = '          React.createElement(Button, { text: "Discard saved job", danger: true, onPress: () => { clearSavedJob(); toast("Saved purge checkpoint discarded"); } }),';
+    if (!out.includes(oldDiscard)) throw new Error("Could not patch Purge Tools discard action");
+    out = out.replace(oldDiscard, newDiscard);
+
+    return out;
+  }
+
   function portSource(source) {
     let out = String(source);
 
@@ -253,10 +361,11 @@
 
     out = out.replace(
       'const PLUGIN_VERSION = "1.1.1";',
-      'const PLUGIN_VERSION = "1.1.4-shiggy";',
+      'const PLUGIN_VERSION = "1.1.5-shiggy";',
     );
 
     out = patchMediaFiltering(out);
+    out = patchCheckpointStorage(out);
 
     const shortcutStart = "  let settingsShortcutCleanup = null;\n\n  function installSettingsShortcut() {";
     const scheduleStart = "  function scheduleAutoResume() {";
@@ -322,9 +431,20 @@
     return loadPromise;
   }
 
+  function wrapperCurrentAccountId() {
+    try {
+      const store = V.metro.findByProps?.("getCurrentUser");
+      const id = store?.getCurrentUser?.()?.id;
+      return id ? String(id) : "";
+    } catch { return ""; }
+  }
+
   function hasInterruptedAutoResume() {
     try {
-      return storage.autoResumeInterrupted === true && !!storage.activePurgeJob;
+      if (storage.autoResumeInterrupted !== true) return false;
+      const accountId = wrapperCurrentAccountId();
+      if (!accountId) return false;
+      return !!storage.activePurgeJobs?.[accountId];
     } catch {
       return false;
     }
