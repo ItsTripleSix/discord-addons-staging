@@ -1,13 +1,13 @@
 {
   "name": "Purge Tools",
-  "description": "Startup-safe ShiggyCord port of Purge Tools. No settings-list injection; the core loads only when opened or when a real auto-resume job exists.",
+  "description": "Startup-safe ShiggyCord port of Purge Tools with linked-media detection and per-target file-extension preservation.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "d535930f6dbd99b336feec4debbc6172ea066eea",
+  "hash": "b85b7ab2b64cd5e6395c9574d1b02d82e1719e15",
   "vendetta": {
     "icon": "TrashIcon"
   }
