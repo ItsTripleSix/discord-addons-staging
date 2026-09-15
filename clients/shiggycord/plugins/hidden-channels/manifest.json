@@ -1,0 +1,14 @@
+{
+  "name": "Hidden Channels",
+  "description": "Shows inaccessible server channels and restores their names when Discord still has the metadata locally. ShiggyCord test build; rendering only, no message access.",
+  "authors": [
+    {
+      "name": "ItsTripleSix"
+    }
+  ],
+  "main": "index.js",
+  "hash": "f6602c8665602a74ed469faf82668c617ad1c335",
+  "vendetta": {
+    "icon": "LockIcon"
+  }
+}

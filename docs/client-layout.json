@@ -1,0 +1,11 @@
+{
+  "repository": "ItsTripleSix/discord-addons-staging",
+  "role": "Public staging, testing, and refetch builds",
+  "source_of_updates": "Retained compatibility paths until installed consumers are deliberately migrated",
+  "mirrors": [
+    {
+      "source": "plugins",
+      "mirror": "clients/shiggycord/plugins"
+    }
+  ]
+}

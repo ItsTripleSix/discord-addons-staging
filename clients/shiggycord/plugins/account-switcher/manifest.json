@@ -1,0 +1,14 @@
+{
+  "name": "Account Switcher",
+  "description": "ShiggyCord account switcher with optimized active-account-only Android push registration and native notification handling.",
+  "authors": [
+    {
+      "name": "ItsTripleSix"
+    }
+  ],
+  "main": "index.js",
+  "hash": "010bbe22b6246c544d8e912347e9e97aecdf680b",
+  "vendetta": {
+    "icon": "UserIcon"
+  }
+}

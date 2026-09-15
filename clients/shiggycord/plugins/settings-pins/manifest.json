@@ -1,0 +1,14 @@
+{
+  "name": "Settings Pins",
+  "description": "Pin any installed plugin's settings directly into ShiggyCord using ShiggyCord's own settings registry. No Metro polling or settings-list patching.",
+  "authors": [
+    {
+      "name": "ItsTripleSix"
+    }
+  ],
+  "main": "index.js",
+  "hash": "ebfe485ef7400c76417645ef9c8baacfdb224065",
+  "vendetta": {
+    "icon": "PuzzlePieceIcon"
+  }
+}
