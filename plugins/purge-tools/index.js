@@ -54,21 +54,21 @@
     out = replaceOnce(
       out,
       'const PLUGIN_VERSION = "1.1.7-shiggy";',
-      'const PLUGIN_VERSION = "1.1.8-shiggy";',
+      'const PLUGIN_VERSION = "1.1.9-shiggy";',
       "plugin version",
     );
 
     out = replaceOnce(
       out,
       '  const PACING_VERSION = 1;\\n',
-      '  const PACING_VERSION = 2;\\n',
+      '  const PACING_VERSION = 3;\\n',
       "pacing state version",
     );
 
     out = replaceOnce(
       out,
       '  const pacingFloor = kind => kind === \\"read\\" ? 400 : 1200;\\n',
-      '  const pacingFloor = kind => kind === \\"read\\" ? 400 : 300;\\n  const pacingStart = kind => kind === \\"read\\" ? 400 : 650;\\n',
+      '  const pacingFloor = kind => kind === \\"read\\" ? 400 : 1200;\\n  const pacingStart = kind => kind === \\"read\\" ? 400 : 1350;\\n',
       "pacing floors",
     );
 
@@ -82,8 +82,43 @@
     out = replaceOnce(
       out,
       '    success(headersAvailable, now = Date.now()) {\\n      if (headersAvailable && now - this.lastLimited >= 600000 && ++this.good >= 120) {\\n        this.delay = Math.max(pacingFloor(this.kind), Math.ceil(this.delay * 0.95));\\n        this.good = 0;\\n      }\\n    }\\n',
-      '    success(headersAvailable, now = Date.now()) {\\n      if (now - this.lastLimited < 600000) { this.good = 0; return; }\\n      this.good++;\\n      const threshold = headersAvailable ? 120 : 60;\\n      if (this.good >= threshold) {\\n        const factor = headersAvailable ? 0.95 : 0.90;\\n        this.delay = Math.max(pacingFloor(this.kind), Math.ceil(this.delay * factor));\\n        this.good = 0;\\n      }\\n    }\\n',
-      "headerless pacing adaptation",
+      '    success(headersAvailable, now = Date.now()) {\\n      if (now - this.lastLimited < 600000) { this.good = 0; return; }\\n      this.good++;\\n      const threshold = headersAvailable ? 120 : 300;\\n      if (this.good >= threshold) {\\n        this.delay = Math.max(pacingFloor(this.kind), Math.ceil(this.delay * 0.95));\\n        this.good = 0;\\n      }\\n    }\\n',
+      "slow pacing probe",
+    );
+
+    out = replaceOnce(
+      out,
+      '    limited(ms, now = Date.now()) {\\n      this.good = 0;\\n      this.lastLimited = now;\\n      this.delay = Math.min(30000, Math.max(this.delay + 250, Math.ceil(this.delay * 1.5)));\\n      this.blocked = Math.max(this.blocked, now + ms + PACING_BUFFER);\\n      this.updatedAt = now;\\n    }\\n',
+      '    limited(ms, now = Date.now()) {\\n      this.good = 0;\\n      this.lastLimited = now;\\n      this.delay = Math.min(30000, Math.max(pacingStart(this.kind), this.delay + 75, Math.ceil(this.delay * 1.08)));\\n      this.blocked = Math.max(this.blocked, now + ms + PACING_BUFFER);\\n      this.updatedAt = now;\\n    }\\n',
+      "controlled 429 recovery",
+    );
+
+    out = replaceOnce(
+      out,
+      '        ms += count * (this.rate.operationDelay(operation) + (this.networkMs[operation] ?? 0));\\n',
+      '        ms += count * Math.max(this.rate.operationDelay(operation), this.networkMs[operation] ?? 0);\\n',
+      "start-spacing ETA",
+    );
+
+    out = replaceOnce(
+      out,
+      '          const scope = global ? \\"global\\" : rawScope === \\"shared\\" ? \\"shared\\" : \\"route\\";\\n          lane.limited(ms);\\n          if (global) this.globalUntil = Math.max(this.globalUntil, Date.now() + ms + PACING_BUFFER);\\n',
+      '          const scope = global ? \\"global\\" : rawScope === \\"shared\\" ? \\"shared\\" : \\"route\\";\\n          lane.limited(ms);\\n          if (scope === \\"shared\\") lane.blocked = Math.max(lane.blocked, Date.now() + Math.max(ms + PACING_BUFFER, 5000));\\n          if (global) this.globalUntil = Math.max(this.globalUntil, Date.now() + ms + PACING_BUFFER);\\n',
+      "shared bucket recovery",
+    );
+
+    out = replaceOnce(
+      out,
+      '          if (this.limitTimes.length >= 3) this.hold(\\"Repeated Discord rate limits. Paused with progress saved; copy the test report before resuming.\\");\\n',
+      '          if (this.limitTimes.length >= 5) this.hold(\\"Repeated Discord rate limits. Paused with progress saved; copy the test report before resuming.\\");\\n',
+      "repeated limit hold threshold",
+    );
+
+    out = replaceOnce(
+      out,
+      '        lane.nextAt = Date.now() + lane.effectiveDelay();\\n        this.accountNextAt = Date.now() + pacingFloor(kind);\\n',
+      '        lane.nextAt = requestStart + lane.effectiveDelay();\\n        this.accountNextAt = requestStart + pacingFloor(kind);\\n',
+      "request-start pacing",
     );
 
     const insertMarker = '    return out;\n  }\n\n  function portSource(source) {';
@@ -108,7 +143,7 @@
 
   async function loadInner() {
     const source = patchBaseSource(await fetchBaseSource());
-    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.1.8-base.js`);
+    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.1.9-base.js`);
     const raw = factory(V);
     const resolved = typeof raw === "function" ? raw() : raw;
     return await Promise.resolve(resolved?.default ?? resolved ?? {});
