@@ -1,13 +1,13 @@
 {
   "name": "Purge Tools",
-  "description": "Startup-safe ShiggyCord Purge Tools port with linked-media detection, per-target file-extension preservation, and account-scoped purge checkpoints.",
+  "description": "ShiggyCord Purge Tools with adaptive pacing, live cleanup ETA, local test reports, media protection, and account-scoped resume checkpoints.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "1e7f01681f76b4a5d583340f59435f785236c0f6",
+  "hash": "fea21534dcc1c52f9d42706a38d5ccf64d7522f8",
   "vendetta": {
     "icon": "TrashIcon"
   }
