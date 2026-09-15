@@ -1,212 +1,179 @@
 (() => {
   "use strict";
-
   const V = vendetta;
   if (!V?.metro || !V?.patcher) return {};
-
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
-  const BASE_URL = "https://raw.githubusercontent.com/ItsTripleSix/discord-addons-staging/9528af7b82f442173805b5db3fc9a061c1a3b857/plugins/purge-tools/index.js";
-  const BASE_CACHE_KEY = "shiggyPurgeWrapperBase117";
-  const SMART_RUNTIME_SOURCE = "  const PACING_VERSION = 4;\n  const PACING_DAY = 86400000;\n  const PACING_TTL = 7 * PACING_DAY;\n  const PACING_BUFFER = 250;\n  const PACING_LONG_WAIT = 300000;\n  const PROBE_FREEZE = 600000;\n  const PROBE_ACCEPT_MS = 150000;\n  const PROBE_ACCEPT_SUCCESSES = 100;\n  const PROBE_ARM_SUCCESSES = 60;\n  const GLOBAL_START_GAP = 200;\n  const pacingFloor = kind => kind === \"read\" ? 200 : 350;\n  const pacingStart = kind => kind === \"read\" ? 400 : 1200;\n  const pacingNumber = value => {\n    if (value == null || String(value).trim() === \"\") return null;\n    const n = Number(value);\n    return Number.isFinite(n) && n >= 0 ? n : null;\n  };\n  const pacingClamp = (value, min, max) => Math.max(min, Math.min(max, value));\n  function pacingStop(message) {\n    const error = new Error(message);\n    error.purgeStop = true;\n    return error;\n  }\n  function pacingDuration(ms) {\n    if (!Number.isFinite(ms)) return \"Calculating…\";\n    const seconds = Math.max(0, Math.ceil(ms / 1000));\n    if (seconds < 60) return `${seconds}s`;\n    const minutes = Math.ceil(seconds / 60);\n    return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;\n  }\n  function responseHeader(source, name) {\n    const wanted = String(name).toLowerCase();\n    for (const headers of [source?.headers, source?.response?.headers]) {\n      if (!headers) continue;\n      try {\n        if (typeof headers.get === \"function\") {\n          const value = headers.get(name) ?? headers.get(wanted);\n          if (value != null) return value;\n        }\n        for (const [key, raw] of Object.entries(headers)) {\n          if (String(key).toLowerCase() !== wanted) continue;\n          if (Array.isArray(raw)) return raw[0];\n          return raw && typeof raw === \"object\" && \"value\" in raw ? raw.value : raw;\n        }\n      } catch {}\n    }\n    return undefined;\n  }\n  function pacingWindow(response, now = Date.now()) {\n    const after = pacingNumber(responseHeader(response, \"X-RateLimit-Reset-After\"));\n    const epoch = pacingNumber(responseHeader(response, \"X-RateLimit-Reset\"));\n    return after != null ? Math.ceil(after * 1000) : epoch != null ? Math.max(0, Math.ceil(epoch * 1000 - now)) : null;\n  }\n  function pacingRetry(error, now = Date.now()) {\n    const body = error?.body ?? error?.response?.body;\n    const values = [body?.retry_after, error?.retry_after, responseHeader(error, \"Retry-After\")]\n      .map(pacingNumber).filter(value => value != null).map(value => Math.ceil(value * 1000));\n    const header = responseHeader(error, \"Retry-After\");\n    if (header && pacingNumber(header) == null) {\n      const date = Date.parse(String(header));\n      if (Number.isFinite(date)) values.push(Math.max(0, date - now));\n    }\n    if (!values.length) {\n      const window = pacingWindow(error, now);\n      if (window != null) values.push(window);\n    }\n    const ms = values.length ? Math.max(...values) : 1000;\n    if (!Number.isSafeInteger(now + ms + PACING_BUFFER)) throw pacingStop(\"Discord returned an unreadable cooldown; stopped for review\");\n    return ms;\n  }\n  function pacingIdentity(key, kind, url) {\n    const operation = String(key).split(\":\")[0];\n    const match = String(url ?? \"\").match(/^\\/(channels|guilds)\\/([^/]+)/);\n    const major = match ? `${match[1]}:${match[2]}` : `channels:${String(key).split(\":\")[1] ?? \"unknown\"}`;\n    return { operation, major, key: `${kind}:${operation}:${major}` };\n  }\n\n  class Control {\n    constructor() {\n      this.cancelled = false;\n      this.userCancelled = false;\n      this.paused = false;\n      this.resumePhase = \"discovering\";\n      this.accountId = purgeAccountId();\n      this.failure = null;\n      this.pausedAt = 0;\n      this.pausedMs = 0;\n    }\n    assertAccount() {\n      if (this.failure) throw this.failure;\n      if (!this.accountId || purgeAccountId() !== this.accountId) {\n        this.failure = pacingStop(\"Discord account changed; purge stopped before the next request\");\n        throw this.failure;\n      }\n      if (this.cancelled) throw new Error(\"__PURGE_CANCELLED__\");\n    }\n    pausedTime(now = Date.now()) { return this.pausedMs + (this.paused ? now - this.pausedAt : 0); }\n    cancel(user = false) {\n      this.cancelled = true;\n      this.userCancelled ||= user && purgeAccountId() === this.accountId;\n      if (this.paused) this.pausedMs += Date.now() - this.pausedAt;\n      this.paused = false;\n    }\n    pause(reason = \"Paused\") {\n      if (this.cancelled || this.paused) return;\n      if ([\"discovering\", \"purging\", \"verifying\"].includes(progress.phase)) this.resumePhase = progress.phase;\n      this.paused = true;\n      this.pausedAt = Date.now();\n      setProgress({ phase: \"paused\", status: reason });\n    }\n    resume() {\n      if (!this.paused || this.cancelled) return;\n      try { this.assertAccount(); } catch (error) { toast(error.message); return; }\n      this.pausedMs += Date.now() - this.pausedAt;\n      this.paused = false;\n      runtime.rateController?.releaseHold();\n      setProgress({ phase: this.resumePhase, status: `Resuming ${this.resumePhase}...` });\n    }\n    async check() {\n      this.assertAccount();\n      while (this.paused && !this.cancelled) {\n        await sleep(250);\n        this.assertAccount();\n      }\n      this.assertAccount();\n    }\n    async wait(ms) {\n      const deadline = Date.now() + Math.max(0, ms);\n      do {\n        await this.check();\n        const remaining = deadline - Date.now();\n        if (remaining <= 0) return;\n        await sleep(Math.min(remaining, 250));\n      } while (true);\n    }\n  }\n\n  class RateLane {\n    constructor(kind, saved = {}) {\n      const now = Date.now();\n      this.kind = kind;\n      const fresh = pacingNumber(saved.updatedAt) != null && now - saved.updatedAt <= PACING_TTL;\n      const savedSafe = fresh ? pacingNumber(saved.safeDelay) : null;\n      const savedCurrent = fresh ? pacingNumber(saved.currentDelay ?? saved.delay) : null;\n      const start = pacingStart(kind);\n      this.safeDelay = pacingClamp(savedSafe ?? start, pacingFloor(kind), 30000);\n      if (fresh && savedSafe != null && now - saved.updatedAt <= PACING_DAY) {\n        this.currentDelay = pacingClamp(savedCurrent ?? this.safeDelay, pacingFloor(kind), 30000);\n      } else {\n        this.currentDelay = Math.max(start, this.safeDelay);\n      }\n      this.unsafeDelay = fresh ? pacingNumber(saved.unsafeDelay) : null;\n      if (this.unsafeDelay != null && this.unsafeDelay >= this.safeDelay) this.unsafeDelay = null;\n      this.blocked = fresh ? pacingNumber(saved.blocked) ?? 0 : 0;\n      this.nextAt = 0;\n      this.resetAt = fresh ? pacingNumber(saved.resetAt) ?? 0 : 0;\n      this.headerDelay = fresh ? pacingNumber(saved.headerDelay) ?? 0 : 0;\n      this.lastLimited = fresh ? pacingNumber(saved.lastLimited) ?? 0 : 0;\n      this.probeFreezeUntil = fresh ? pacingNumber(saved.probeFreezeUntil) ?? 0 : 0;\n      this.confidence = pacingClamp(pacingNumber(saved.confidence) ?? (savedSafe != null ? 0.55 : 0.35), 0, 1);\n      this.cleanSuccesses = 0;\n      this.firstCleanAt = 0;\n      this.probing = false;\n      this.probeStartedAt = 0;\n      this.probeSuccesses = 0;\n      this.previousSafe = this.safeDelay;\n      this.limitTimes = Array.isArray(saved.limitTimes) ? saved.limitTimes.filter(time => Number.isFinite(time) && time > now - 600000) : [];\n      this.updatedAt = now;\n    }\n    effectiveDelay(now = Date.now()) {\n      return Math.max(this.currentDelay, now < this.resetAt ? this.headerDelay : 0);\n    }\n    observe(response, now = Date.now()) {\n      const remaining = pacingNumber(responseHeader(response, \"X-RateLimit-Remaining\"));\n      const window = pacingWindow(response, now);\n      if (remaining == null || window == null) return false;\n      this.resetAt = now + window;\n      this.headerDelay = remaining > 0 ? Math.min(window + PACING_BUFFER, Math.ceil((window / remaining) * 1.15)) : 0;\n      if (remaining === 0) this.blocked = Math.max(this.blocked, now + window + PACING_BUFFER);\n      this.confidence = Math.min(1, this.confidence + 0.015);\n      this.updatedAt = now;\n      return true;\n    }\n    candidate() {\n      const floor = pacingFloor(this.kind);\n      if (this.unsafeDelay != null && this.unsafeDelay < this.safeDelay) {\n        const gap = this.safeDelay - this.unsafeDelay;\n        return Math.max(floor, Math.ceil(this.safeDelay - gap * 0.35));\n      }\n      return Math.max(floor, Math.ceil(this.safeDelay * (this.kind === \"read\" ? 0.90 : 0.92)));\n    }\n    maybeProbe(now = Date.now()) {\n      if (this.probing || now < this.probeFreezeUntil || now - this.lastLimited < PROBE_FREEZE) return;\n      if (this.cleanSuccesses < PROBE_ARM_SUCCESSES || !this.firstCleanAt || now - this.firstCleanAt < 60000) return;\n      const next = this.candidate();\n      if (next >= this.safeDelay - 20) return;\n      this.previousSafe = this.safeDelay;\n      this.currentDelay = next;\n      this.probing = true;\n      this.probeStartedAt = now;\n      this.probeSuccesses = 0;\n      this.cleanSuccesses = 0;\n      this.firstCleanAt = 0;\n      this.updatedAt = now;\n    }\n    success(headersAvailable, now = Date.now()) {\n      if (headersAvailable) {\n        this.cleanSuccesses++;\n        this.updatedAt = now;\n        return;\n      }\n      if (!this.firstCleanAt) this.firstCleanAt = now;\n      this.cleanSuccesses++;\n      if (this.probing) {\n        this.probeSuccesses++;\n        if (this.probeSuccesses >= PROBE_ACCEPT_SUCCESSES && now - this.probeStartedAt >= PROBE_ACCEPT_MS) {\n          this.safeDelay = this.currentDelay;\n          this.previousSafe = this.safeDelay;\n          this.probing = false;\n          this.probeSuccesses = 0;\n          this.cleanSuccesses = 0;\n          this.firstCleanAt = 0;\n          this.confidence = Math.min(1, this.confidence + 0.12);\n          this.probeFreezeUntil = now + 60000;\n        }\n      } else {\n        this.maybeProbe(now);\n      }\n      this.updatedAt = now;\n    }\n    limited(ms, scope = \"route\", now = Date.now()) {\n      this.limitTimes = this.limitTimes.filter(time => time > now - 600000);\n      this.limitTimes.push(now);\n      const wasProbe = this.probing;\n      const limitedDelay = this.currentDelay;\n      this.unsafeDelay = Math.max(this.unsafeDelay ?? 0, limitedDelay);\n      if (wasProbe) {\n        this.currentDelay = Math.max(this.previousSafe, this.safeDelay);\n      } else {\n        this.safeDelay = Math.min(30000, Math.max(pacingStart(this.kind), Math.ceil(limitedDelay * (this.limitTimes.length >= 3 ? 1.18 : 1.10))));\n        this.currentDelay = this.safeDelay;\n      }\n      this.probing = false;\n      this.probeSuccesses = 0;\n      this.cleanSuccesses = 0;\n      this.firstCleanAt = 0;\n      this.lastLimited = now;\n      const freeze = this.limitTimes.length >= 3 ? 1800000 : PROBE_FREEZE;\n      this.probeFreezeUntil = Math.max(this.probeFreezeUntil, now + freeze);\n      const drain = scope === \"shared\" ? 5000 : scope === \"global\" ? 2500 : 1000;\n      this.blocked = Math.max(this.blocked, now + ms + PACING_BUFFER, now + drain);\n      this.confidence = Math.max(0.1, this.confidence - (wasProbe ? 0.08 : 0.18));\n      this.updatedAt = now;\n    }\n    mode(now = Date.now()) {\n      if (now < this.blocked) return \"cooldown\";\n      if (this.probing) return \"probing\";\n      if (now < this.probeFreezeUntil) return \"stabilizing\";\n      return this.confidence >= 0.7 ? \"learned\" : \"learning\";\n    }\n    snapshot() {\n      return {\n        kind: this.kind, safeDelay: this.safeDelay, currentDelay: this.currentDelay,\n        unsafeDelay: this.unsafeDelay, blocked: this.blocked, resetAt: this.resetAt,\n        headerDelay: this.headerDelay, lastLimited: this.lastLimited,\n        probeFreezeUntil: this.probeFreezeUntil, confidence: this.confidence,\n        limitTimes: this.limitTimes, updatedAt: this.updatedAt,\n      };\n    }\n  }\n\n  class PurgeMetrics {\n    constructor(rate) {\n      this.rate = rate;\n      this.startedAt = Date.now();\n      this.finishedAt = 0;\n      this.requests = [];\n      this.deletions = [];\n      this.workEvents = [];\n      this.responses = {};\n      this.routes = {};\n      this.limitEvents = [];\n      this.rateLimits = 0;\n      this.headersSeen = 0;\n      this.requestCount = 0;\n      this.networkMs = {};\n      this.pacingMs = {};\n      this.observedLimits = {};\n      this.inFlightAt = 0;\n      this.inFlightOperation = \"\";\n      this.inFlightCount = 0;\n      this.pending = null;\n      this.workTotal = 0;\n      this.workDone = 0;\n      this.workActive = false;\n      this.workStartedAt = 0;\n      this.waitUntil = 0;\n      this.waitKind = \"\";\n      this.waitStarted = 0;\n      this.waitTotals = { pacing: 0, cooldown: 0, indexing: 0 };\n      this.indexWaits = 0;\n      this.lastSavedAt = 0;\n      this.lastSavedLimits = 0;\n    }\n    request(operation) {\n      const now = Date.now();\n      this.requests.push(now);\n      this.requests = this.requests.filter(time => time > now - 3600000);\n      this.requestCount++;\n      this.routes[operation] = (this.routes[operation] ?? 0) + 1;\n      this.inFlightCount++;\n      if (!this.inFlightAt) this.inFlightAt = now;\n      this.inFlightOperation = operation;\n    }\n    response(operation, status, duration, response) {\n      this.inFlightCount = Math.max(0, this.inFlightCount - 1);\n      if (!this.inFlightCount) this.inFlightAt = 0;\n      this.responses[status] = (this.responses[status] ?? 0) + 1;\n      if (status >= 200 && status < 300) {\n        this.networkMs[operation] = this.networkMs[operation] == null ? duration : this.networkMs[operation] * 0.8 + duration * 0.2;\n      }\n      if (pacingNumber(responseHeader(response, \"X-RateLimit-Remaining\")) != null) {\n        this.headersSeen++;\n        this.observedLimits[operation] = {\n          limit: pacingNumber(responseHeader(response, \"X-RateLimit-Limit\")),\n          remaining: pacingNumber(responseHeader(response, \"X-RateLimit-Remaining\")),\n          reset_after_s: pacingNumber(responseHeader(response, \"X-RateLimit-Reset-After\")),\n        };\n      }\n    }\n    observePace(operation, delay) {\n      this.pacingMs[operation] = this.pacingMs[operation] == null ? delay : this.pacingMs[operation] * 0.9 + delay * 0.1;\n    }\n    limit(operation, scope, ms, response, lane) {\n      this.rateLimits++;\n      this.limitEvents.push({\n        elapsed_s: Math.round((Date.now() - this.startedAt) / 1000), operation, scope,\n        retry_after_s: ms / 1000, pacing_ms: Math.ceil(lane.currentDelay),\n        safe_ms: Math.ceil(lane.safeDelay), unsafe_ms: lane.unsafeDelay == null ? null : Math.ceil(lane.unsafeDelay),\n        controller_mode: lane.mode(),\n        limit: pacingNumber(responseHeader(response, \"X-RateLimit-Limit\")),\n        remaining: pacingNumber(responseHeader(response, \"X-RateLimit-Remaining\")),\n        reset_after_s: pacingNumber(responseHeader(response, \"X-RateLimit-Reset-After\")),\n      });\n      this.limitEvents = this.limitEvents.slice(-30);\n    }\n    beginWait(kind, until) {\n      this.endWait();\n      this.waitKind = kind;\n      this.waitUntil = until;\n      this.waitStarted = Date.now();\n    }\n    endWait() {\n      if (this.waitStarted && this.waitKind in this.waitTotals) {\n        this.waitTotals[this.waitKind] += Math.max(0, Math.min(Date.now(), this.waitUntil) - this.waitStarted);\n      }\n      this.waitStarted = 0;\n      this.waitUntil = 0;\n      this.waitKind = \"\";\n    }\n    messagePlan(messages, target) {\n      const plan = { delete: 0, \"bulk-delete\": 0, reaction: 0 };\n      const groups = new Map();\n      for (const message of messages) {\n        if (target.strictOrder !== true && message.moderation && isBulkRecent(message.messageId)) {\n          groups.set(message.channelId, (groups.get(message.channelId) ?? 0) + 1);\n        } else plan.delete++;\n      }\n      for (const size of groups.values()) {\n        plan[\"bulk-delete\"] += Math.floor(size / BULK_MAX);\n        const remainder = size % BULK_MAX;\n        if (remainder === 1) plan.delete++;\n        else if (remainder > 1) plan[\"bulk-delete\"]++;\n      }\n      return plan;\n    }\n    beginWork(found, target, verify) {\n      this.pending = this.messagePlan(found.messages, target);\n      this.pending.reaction = found.reactions.length;\n      this.workTotal = found.messages.length + found.reactions.length;\n      this.workDone = 0;\n      this.workActive = true;\n      this.workStartedAt = Date.now();\n      this.workEvents = [];\n      this.verificationWork = !!verify;\n      notify();\n    }\n    recordWork(units) {\n      const now = Date.now();\n      if (units > 0) this.workEvents.push({ time: now, units });\n      this.workEvents = this.workEvents.filter(item => item.time > now - 300000);\n    }\n    finishTask(operation, units, deleted = false) {\n      if (this.pending) this.pending[operation] = Math.max(0, (this.pending[operation] ?? 0) - 1);\n      this.workDone += units;\n      this.recordWork(units);\n      if (deleted) this.deletions.push({ time: Date.now(), units });\n      this.deletions = this.deletions.filter(item => item.time > Date.now() - 60000);\n    }\n    skipMessages(messages, target) {\n      const plan = this.messagePlan(messages, target);\n      if (this.pending) for (const key of Object.keys(plan)) this.pending[key] = Math.max(0, this.pending[key] - plan[key]);\n      this.workDone += messages.length;\n      this.recordWork(messages.length);\n    }\n    fallbackBatch(size) {\n      if (!this.pending) return;\n      this.pending[\"bulk-delete\"] = Math.max(0, this.pending[\"bulk-delete\"] - 1);\n      this.pending.delete += size;\n    }\n    endWork() { this.workActive = false; this.pending = null; notify(); }\n    queueEta(now = Date.now()) {\n      if (!this.workActive || !this.pending) return null;\n      let ms = 0;\n      for (const [operation, count] of Object.entries(this.pending)) {\n        ms += count * Math.max(this.rate.operationDelay(operation), this.networkMs[operation] ?? 0);\n      }\n      const cooldown = Math.max(this.rate.globalUntil, this.rate.activeLane?.blocked ?? 0, this.waitKind === \"cooldown\" ? this.waitUntil : 0);\n      return Math.ceil(ms + Math.max(0, cooldown - now));\n    }\n    empiricalEta(now = Date.now()) {\n      if (!this.workActive || this.workDone <= 0) return null;\n      const windowStart = Math.max(this.workStartedAt, now - 180000);\n      const recent = this.workEvents.filter(item => item.time >= windowStart);\n      const units = recent.reduce((sum, item) => sum + item.units, 0);\n      const elapsed = Math.max(1, now - windowStart);\n      if (units < 20 || elapsed < 30000) return null;\n      const perMs = units / elapsed;\n      const remaining = Math.max(0, this.workTotal - this.workDone);\n      return perMs > 0 ? Math.ceil(remaining / perMs) : null;\n    }\n    eta(now = Date.now()) {\n      const queue = this.queueEta(now);\n      const empirical = this.empiricalEta(now);\n      if (queue == null) return empirical;\n      if (empirical == null) return queue;\n      const weight = Math.min(0.7, Math.max(0.25, this.workDone / Math.max(1, this.workTotal)));\n      return Math.ceil(queue * (1 - weight) + empirical * weight);\n    }\n    etaRange(now = Date.now()) {\n      const best = this.eta(now);\n      if (best == null) return null;\n      const sample = this.workEvents.reduce((sum, item) => sum + item.units, 0);\n      const recentLimit = this.rate.limitTimes.some(time => time > now - 600000);\n      const confidence = pacingClamp(0.35 + Math.min(0.45, sample / 250) - (recentLimit ? 0.15 : 0), 0.2, 0.9);\n      const spread = 0.35 - confidence * 0.22;\n      return { best, low: Math.max(0, Math.floor(best * (1 - spread))), high: Math.ceil(best * (1 + spread * 1.5)), confidence };\n    }\n    report() {\n      const now = this.finishedAt || Date.now();\n      const requestCountSince = ms => this.requests.filter(time => time > now - ms).length;\n      const deletedLastMinute = this.deletions.filter(item => item.time > now - 60000).reduce((sum, item) => sum + item.units, 0);\n      const range = this.etaRange(now);\n      const lane = this.rate.activeLane;\n      return {\n        plugin_version: PLUGIN_VERSION, report_version: 2, phase: progress.phase,\n        elapsed_s: Math.round((now - this.startedAt) / 1000),\n        requests: this.requestCount,\n        requests_last_1s: requestCountSince(1000), requests_last_60s: requestCountSince(60000), requests_last_3600s: requestCountSince(3600000),\n        responses: { ...this.responses }, operations: { ...this.routes }, rate_limits: this.rateLimits,\n        observed_limits: clone(this.observedLimits),\n        average_response_ms: Object.fromEntries(Object.entries(this.networkMs).map(([key, ms]) => [key, Math.round(ms)])),\n        in_flight_s: this.inFlightAt ? Math.round((now - this.inFlightAt) / 1000) : 0,\n        in_flight_requests: this.inFlightCount,\n        responses_with_rate_headers: this.headersSeen, search_index_waits: this.indexWaits,\n        wait_seconds: Object.fromEntries(Object.entries(this.waitTotals).map(([key, ms]) => [key, Math.round(ms / 1000)])),\n        messages_deleted: progress.messagesDeleted, reactions_removed: progress.reactionsRemoved,\n        deleted_last_60s: deletedLastMinute, skipped: progress.skipped, failed: progress.failed,\n        pages: progress.pages, messages_examined: progress.scanned, permission_skips: progress.permissionSkipped,\n        current_target_total: this.workTotal, current_target_processed: this.workDone,\n        cleanup_eta_s: range == null ? null : Math.ceil(range.best / 1000),\n        cleanup_eta_low_s: range == null ? null : Math.ceil(range.low / 1000),\n        cleanup_eta_high_s: range == null ? null : Math.ceil(range.high / 1000),\n        eta_confidence: range == null ? null : Number(range.confidence.toFixed(2)),\n        current_pacing_ms: Math.ceil(lane?.effectiveDelay(now) ?? pacingStart(\"modify\")),\n        controller_mode: lane?.mode(now) ?? \"initializing\",\n        learned_safe_ms: lane ? Math.ceil(lane.safeDelay) : null,\n        known_unsafe_ms: lane?.unsafeDelay == null ? null : Math.ceil(lane.unsafeDelay),\n        learning_confidence: lane ? Number(lane.confidence.toFixed(2)) : null,\n        probe_successes: lane?.probing ? lane.probeSuccesses : 0,\n        limits_last_10m: this.rate.limitTimes.filter(time => time > now - 600000).length,\n        active_resource_lanes: this.rate.lanes.size,\n        wait_reason: this.waitKind || null,\n        cooldown_remaining_s: Math.ceil(Math.max(0, this.rate.globalUntil - now, (lane?.blocked ?? 0) - now) / 1000),\n        recent_limits: this.limitEvents.map(event => ({ ...event })),\n      };\n    }\n    saveReport() {\n      if (purgeAccountId() === this.rate.accountId) {\n        const reports = { ...(storage.shiggyPurgeTestReports ?? {}) };\n        reports[this.rate.accountId] = this.report();\n        storage.shiggyPurgeTestReports = reports;\n        this.lastSavedAt = Date.now();\n        this.lastSavedLimits = this.rateLimits;\n      }\n    }\n    finish() {\n      this.endWait();\n      this.finishedAt = Date.now();\n      this.rate.persist();\n      this.saveReport();\n    }\n  }\n\n  class RateController {\n    constructor(control) {\n      this.control = control;\n      this.accountId = control.accountId;\n      const state = storage.shiggyPurgePacing?.[this.accountId];\n      const saved = state?.version === PACING_VERSION ? state : {};\n      this.lanes = new Map();\n      this.aliases = new Map();\n      for (const [key, value] of Object.entries(saved.lanes ?? {})) {\n        if (value?.updatedAt > Date.now() - PACING_TTL || value?.blocked > Date.now()) {\n          this.lanes.set(key, new RateLane(value.kind === \"read\" ? \"read\" : \"modify\", value));\n        }\n      }\n      for (const [key, value] of Object.entries(saved.aliases ?? {})) if (this.lanes.has(value)) this.aliases.set(key, value);\n      this.globalUntil = pacingNumber(saved.globalUntil) ?? 0;\n      this.globalNextAt = 0;\n      this.limitTimes = Array.isArray(saved.limitTimes) ? saved.limitTimes.filter(time => Number.isFinite(time) && time > Date.now() - 600000) : [];\n      this.holdReason = typeof saved.holdReason === \"string\" ? saved.holdReason : \"\";\n      this.activeLane = null;\n      this.operationLanes = new Map();\n      this.resourceQueues = new Map();\n      this.startGate = Promise.resolve();\n      this.metrics = new PurgeMetrics(this);\n      if (this.holdReason) control.pause(this.holdReason);\n    }\n    lane(identity, kind) {\n      const key = this.aliases.get(identity.key) ?? identity.key;\n      if (!this.lanes.has(key)) this.lanes.set(key, new RateLane(kind));\n      const lane = this.lanes.get(key);\n      if (kind === \"modify\") lane.kind = \"modify\";\n      this.operationLanes.set(identity.operation, lane);\n      return lane;\n    }\n    mergeLane(target, source) {\n      target.safeDelay = Math.max(target.safeDelay, source.safeDelay);\n      target.currentDelay = Math.max(target.currentDelay, source.currentDelay);\n      if (source.unsafeDelay != null) target.unsafeDelay = Math.max(target.unsafeDelay ?? 0, source.unsafeDelay);\n      target.blocked = Math.max(target.blocked, source.blocked);\n      target.resetAt = Math.max(target.resetAt, source.resetAt);\n      target.headerDelay = Math.max(target.headerDelay, source.headerDelay);\n      target.lastLimited = Math.max(target.lastLimited, source.lastLimited);\n      target.probeFreezeUntil = Math.max(target.probeFreezeUntil, source.probeFreezeUntil);\n      target.confidence = Math.min(target.confidence, source.confidence);\n      target.updatedAt = Date.now();\n      return target;\n    }\n    bind(identity, kind, response, lane) {\n      const bucket = responseHeader(response, \"X-RateLimit-Bucket\");\n      if (!bucket) return lane;\n      const key = `bucket:${String(bucket)}:${identity.major}`;\n      const previousKey = this.aliases.get(identity.key);\n      const shared = this.lanes.get(key);\n      if (shared && shared !== lane) lane = this.mergeLane(shared, lane);\n      else if (!shared && previousKey && previousKey !== key) lane = new RateLane(kind, lane.snapshot());\n      this.lanes.set(key, lane);\n      this.aliases.set(identity.key, key);\n      this.operationLanes.set(identity.operation, lane);\n      return lane;\n    }\n    operationDelay(operation) {\n      return Math.max(this.operationLanes.get(operation)?.effectiveDelay() ?? pacingStart(\"modify\"), this.metrics.pacingMs[operation] ?? 0);\n    }\n    persist() {\n      const all = { ...(storage.shiggyPurgePacing ?? {}) };\n      all[this.accountId] = {\n        version: PACING_VERSION, updatedAt: Date.now(), globalUntil: this.globalUntil,\n        holdReason: this.holdReason, limitTimes: this.limitTimes,\n        aliases: Object.fromEntries(this.aliases),\n        lanes: Object.fromEntries([...this.lanes.entries()].map(([key, lane]) => [key, lane.snapshot()])),\n      };\n      storage.shiggyPurgePacing = clone(all);\n      if (this.metrics && (Date.now() - this.metrics.lastSavedAt >= 30000 || this.control.paused || this.metrics.lastSavedLimits !== this.metrics.rateLimits)) this.metrics.saveReport();\n    }\n    releaseHold() {\n      this.holdReason = \"\";\n      this.longWaitAcknowledged = Math.max(this.globalUntil, ...[...this.lanes.values()].map(lane => lane.blocked));\n      this.persist();\n    }\n    hold(reason) { this.holdReason = reason; this.control.pause(reason); this.persist(); }\n    reserveGlobal() {\n      const task = this.startGate.then(async () => {\n        await this.control.check();\n        const now = Date.now();\n        const deadline = Math.max(this.globalUntil, this.globalNextAt);\n        if (deadline > now) await this.control.wait(deadline - now);\n        await this.control.check();\n        this.globalNextAt = Date.now() + GLOBAL_START_GAP;\n      });\n      this.startGate = task.catch(() => {});\n      return task;\n    }\n    run(key, kind, fn, url) {\n      const identity = pacingIdentity(key, kind, url);\n      const queueKey = `${kind}:${identity.major}`;\n      const previous = this.resourceQueues.get(queueKey) ?? Promise.resolve();\n      const pending = previous.then(() => this.runRequest(identity, kind, fn));\n      const tail = pending.catch(() => {});\n      this.resourceQueues.set(queueKey, tail);\n      pending.finally(() => {\n        if (this.resourceQueues.get(queueKey) === tail) this.resourceQueues.delete(queueKey);\n      }).catch(() => {});\n      return pending;\n    }\n    async runRequest(identity, kind, fn) {\n      let lane = this.lane(identity, kind);\n      for (;;) {\n        await this.control.check();\n        this.activeLane = lane;\n        const now = Date.now();\n        const blockedUntil = Math.max(lane.blocked, this.globalUntil);\n        const deadline = Math.max(lane.nextAt, blockedUntil);\n        if (deadline > now) {\n          const reason = blockedUntil > now ? \"cooldown\" : \"pacing\";\n          this.metrics.beginWait(reason, deadline);\n          setProgress({ waitMs: deadline - now });\n          if (blockedUntil - now >= PACING_LONG_WAIT && !this.control.paused && blockedUntil > (this.longWaitAcknowledged ?? 0)) {\n            this.longWaitAcknowledged = blockedUntil;\n            this.hold(`Long Discord cooldown. Paused; requests can resume after ${new Date(blockedUntil).toLocaleTimeString()}.`);\n          }\n          await this.control.wait(deadline - now);\n          this.metrics.endWait();\n          continue;\n        }\n        await this.reserveGlobal();\n        await this.control.check();\n        const afterGate = Date.now();\n        const changedBlock = Math.max(lane.blocked, this.globalUntil);\n        if (changedBlock > afterGate) continue;\n        this.metrics.endWait();\n        setProgress({ waitMs: 0 });\n        const requestStart = Date.now();\n        this.metrics.request(identity.operation);\n        let response;\n        try {\n          response = await fn();\n          const status = Number(response?.status ?? 200);\n          if (status >= 400) throw response;\n        } catch (error) {\n          const status = Number(error?.status ?? error?.response?.status ?? 0);\n          this.metrics.response(identity.operation, status, Date.now() - requestStart, error);\n          lane = this.bind(identity, kind, error, lane);\n          this.activeLane = lane;\n          const headersAvailable = lane.observe(error);\n          if (status === 401 || status === 403) {\n            this.control.failure = pacingStop(status === 401\n              ? \"Discord authentication failed; stopped and kept the resume checkpoint\"\n              : \"Discord denied permission; stopped and kept the resume checkpoint\");\n            this.persist();\n            throw this.control.failure;\n          }\n          if (status !== 429) { this.persist(); throw error; }\n          const ms = pacingRetry(error);\n          const body = error?.body ?? error?.response?.body;\n          const rawScope = String(responseHeader(error, \"X-RateLimit-Scope\") ?? \"\").toLowerCase();\n          const global = body?.global === true || error?.global === true || rawScope === \"global\" || String(responseHeader(error, \"X-RateLimit-Global\")).toLowerCase() === \"true\";\n          const scope = global ? \"global\" : rawScope === \"shared\" ? \"shared\" : \"route\";\n          lane.limited(ms, scope);\n          if (global) this.globalUntil = Math.max(this.globalUntil, Date.now() + ms + PACING_BUFFER);\n          this.metrics.limit(identity.operation, scope, ms, error, lane);\n          this.limitTimes = this.limitTimes.filter(time => time > Date.now() - 600000);\n          this.limitTimes.push(Date.now());\n          this.persist();\n          setProgress({ status: `Discord ${scope} cooldown; controller adjusted automatically.`, waitMs: Math.max(ms, lane.blocked - Date.now()) });\n          if (this.limitTimes.length >= 8) this.hold(\"Discord is repeatedly rate limiting this purge. Paused with progress saved; copy the test report before resuming.\");\n          continue;\n        }\n        this.metrics.response(identity.operation, Number(response?.status ?? 200), Date.now() - requestStart, response);\n        lane = this.bind(identity, kind, response, lane);\n        this.activeLane = lane;\n        const headersAvailable = lane.observe(response);\n        lane.success(headersAvailable);\n        this.metrics.observePace(identity.operation, lane.effectiveDelay());\n        lane.nextAt = requestStart + lane.effectiveDelay();\n        this.persist();\n        this.control.assertAccount();\n        return response;\n      }\n    }\n    async indexing(ms) {\n      const wait = Number.isFinite(ms) && ms >= 0 ? ms : 1000;\n      this.metrics.indexWaits++;\n      this.metrics.beginWait(\"indexing\", Date.now() + wait);\n      setProgress({ waitMs: wait, status: \"Waiting for Discord search index...\" });\n      await this.control.wait(wait);\n      this.metrics.endWait();\n    }\n  }\n\n  function copyPurgeTestReport() {\n    const accountId = purgeAccountId();\n    const rate = runtime.rateController;\n    const report = rate?.accountId === accountId ? rate.metrics.report() : storage.shiggyPurgeTestReports?.[accountId];\n    if (!report) { toast(\"Run a preview or purge to collect a test report\"); return; }\n    const clipboard = V.metro.common?.clipboard ?? find(\"setString\", \"getString\") ?? RN.Clipboard;\n    if (!clipboard?.setString) { toast(\"Clipboard unavailable; take a screenshot of the pacing panel\"); return; }\n    try {\n      Promise.resolve(clipboard.setString(JSON.stringify(report, null, 2)))\n        .then(() => toast(\"Purge test report copied. No message content or account identifiers included.\"))\n        .catch(() => toast(\"Could not copy the test report\"));\n    } catch { toast(\"Could not copy the test report\"); }\n  }\n  function PacingStatus() {\n    const [, tick] = React.useReducer(value => value + 1, 0);\n    const rate = runtime.rateController;\n    const live = !!runtime.control;\n    React.useEffect(() => {\n      if (!live) return;\n      const timer = setInterval(() => tick(), 1000);\n      return () => clearInterval(timer);\n    }, [live]);\n    if (!rate || rate.accountId !== purgeAccountId()) return null;\n    const metrics = rate.metrics;\n    const now = metrics.finishedAt || Date.now();\n    const report = metrics.report();\n    const range = metrics.etaRange(now);\n    const waiting = Math.max(0, metrics.waitUntil - now);\n    let estimate;\n    if (progress.phase === \"paused\") estimate = \"Paused\";\n    else if (!live && [\"error\", \"cancelled\"].includes(progress.phase)) estimate = \"Stopped — resume required\";\n    else if (!range) estimate = [\"discovering\", \"verifying\"].includes(progress.phase) ? \"Calculating — discovery in progress\" : live ? \"Calculating…\" : \"Finished\";\n    else if (range.high - range.low > 60000) estimate = `${pacingDuration(range.low)}–${pacingDuration(range.high)}`;\n    else estimate = pacingDuration(range.best);\n    const confidenceText = range ? `${Math.round(range.confidence * 100)}% ETA confidence` : \"ETA learning\";\n    return React.createElement(Card, { style: { marginTop: 8, borderColor: C.brand } },\n      React.createElement(Txt, { style: { fontWeight: \"800\", fontSize: 16 } }, `Current target cleanup ETA: ${estimate}`),\n      range && live && !rate.control.paused ? React.createElement(Txt, { style: { color: C.muted } }, `${confidenceText} · likely finish around ${new Date(now + range.best).toLocaleTimeString()}`) : null,\n      React.createElement(Txt, { style: { color: C.muted, fontSize: 12 } }, \"Estimate covers queued cleanup for this target. Discovery, later targets, and additional verification are extra.\"),\n      metrics.workActive ? React.createElement(Txt, null, `Processed: ${metrics.workDone}/${metrics.workTotal} queued actions`) : null,\n      React.createElement(Txt, null, `Deleted in last minute: ${report.deleted_last_60s} · Elapsed: ${pacingDuration(now - metrics.startedAt)}`),\n      React.createElement(Txt, null, `Requests: ${report.requests_last_1s}/last second · ${report.requests_last_60s}/last minute · ${report.requests_last_3600s}/last hour`),\n      React.createElement(Txt, null, `Controller: ${report.controller_mode} · Rate limits: ${report.rate_limits} · Search-index waits: ${report.search_index_waits}`),\n      React.createElement(Txt, null, `Current spacing: ${(report.current_pacing_ms / 1000).toFixed(2)}s · learned safe: ${report.learned_safe_ms == null ? \"learning\" : (report.learned_safe_ms / 1000).toFixed(2) + \"s\"}`),\n      report.known_unsafe_ms != null ? React.createElement(Txt, null, `Known unsafe boundary: ${(report.known_unsafe_ms / 1000).toFixed(2)}s · confidence: ${Math.round((report.learning_confidence ?? 0) * 100)}%`) : null,\n      waiting ? React.createElement(Txt, null, `${metrics.waitKind === \"cooldown\" ? \"Discord cooldown\" : metrics.waitKind === \"indexing\" ? \"Search indexing\" : \"Preventive pacing\"}: ${pacingDuration(waiting)} remaining`) : null,\n      report.in_flight_s >= 5 ? React.createElement(Txt, null, `Waiting for Discord response: ${report.in_flight_s}s`) : null,\n      React.createElement(Txt, { style: { color: C.muted, fontSize: 12 } }, report.responses_with_rate_headers\n        ? \"Discord rate headers detected; the controller combines them with learned pacing and safety headroom.\"\n        : \"No rate headers exposed. The controller learns from sustained success and 429 feedback, then remembers the safe envelope.\"),\n      React.createElement(Row, null, React.createElement(Button, { text: \"Copy test report\", small: true, onPress: copyPurgeTestReport })),\n    );\n  }";
-
-  let inner = null;
-  let innerError = null;
-  let loadPromise = null;
-  let started = false;
+  const BASE_URL = "https://raw.githubusercontent.com/ItsTripleSix/discord-addons-staging/f193a94e67e9fc3b0a8c8b0a67bb87cc5e3689af/plugins/purge-tools/index.js";
+  const CACHE = "shiggyPurgeWrapperBase120";
+  let inner = null, innerError = null, loadPromise = null, started = false;
   const listeners = new Set();
-
-  function toast(text) {
-    try { V.ui?.toasts?.showToast?.(String(text)); } catch {}
-  }
-
-  function notify() {
-    for (const fn of listeners) try { fn(); } catch {}
-  }
-
-  async function fetchBaseSource() {
+  const toast = text => { try { V.ui?.toasts?.showToast?.(String(text)); } catch {} };
+  const notify = () => { for (const fn of listeners) try { fn(); } catch {} };
+  async function fetchBase() {
     try {
-      const response = await V.utils.safeFetch(BASE_URL, { cache: "no-store" });
-      if (!response?.ok) throw new Error(`HTTP ${response?.status ?? "?"}`);
-      const source = await response.text();
-      if (!source?.includes("Purge Tools") || !source?.includes("1.1.7-shiggy")) {
-        throw new Error("Invalid Purge Tools v1.1.7 base source");
-      }
-      storage[BASE_CACHE_KEY] = source;
-      return source;
-    } catch (error) {
-      const cached = storage[BASE_CACHE_KEY];
-      if (typeof cached === "string" && cached.length > 1000) return cached;
-      throw error;
+      const r = await V.utils.safeFetch(BASE_URL, { cache: "no-store" });
+      if (!r?.ok) throw new Error(`HTTP ${r?.status ?? "?"}`);
+      const s = await r.text();
+      if (!s?.includes("1.2.0-shiggy")) throw new Error("Invalid Purge Tools v1.2.0 base source");
+      storage[CACHE] = s; return s;
+    } catch (e) {
+      const s = storage[CACHE]; if (typeof s === "string" && s.length > 1000) return s; throw e;
     }
   }
+  function once(s, a, b, label) {
+    const i = s.indexOf(a); if (i < 0 || s.indexOf(a, i + a.length) >= 0) throw new Error(`Could not patch ${label}`);
+    return s.slice(0, i) + b + s.slice(i + a.length);
+  }
+  const esc = s => JSON.stringify(String(s)).slice(1, -1);
+  const rex = (s, a, b, label) => once(s, esc(a), esc(b), label);
+  function rinsert(s, marker, raw, label) {
+    const m = esc(marker), i = s.indexOf(m); if (i < 0 || s.indexOf(m, i + m.length) >= 0) throw new Error(`Could not patch ${label}`);
+    return s.slice(0, i) + esc(raw) + s.slice(i);
+  }
 
-  function replaceOnce(source, before, after, label) {
-    const first = source.indexOf(before);
-    if (first < 0 || source.indexOf(before, first + before.length) >= 0) {
-      throw new Error(`Could not patch ${label}`);
+  const SHARED_CLASS = `  class SharedResourceGovernor {
+    constructor(saved = {}) {
+      const now = Date.now(), fresh = pacingNumber(saved.updatedAt) != null && now - saved.updatedAt <= PACING_TTL;
+      this.starts = fresh && Array.isArray(saved.starts) ? saved.starts.filter(t => Number.isFinite(t) && t > now - 120000) : [];
+      this.blocked = fresh ? pacingNumber(saved.blocked) ?? 0 : 0;
+      this.safe = fresh ? pacingNumber(saved.safe) : null;
+      this.unsafe = fresh ? pacingNumber(saved.unsafe) : null;
+      this.probe = null; this.proven = fresh && saved.proven === true;
+      this.confidence = pacingClamp(pacingNumber(saved.confidence) ?? (this.proven ? .75 : .25), 0, 1);
+      this.lastLimited = fresh ? pacingNumber(saved.lastLimited) ?? 0 : 0;
+      this.freezeUntil = fresh ? pacingNumber(saved.freezeUntil) ?? 0 : 0;
+      this.clean = 0; this.firstClean = 0; this.probeStarted = 0; this.probeGood = 0; this.updatedAt = now;
     }
-    return source.slice(0, first) + after + source.slice(first + before.length);
+    trim(now = Date.now()) { this.starts = this.starts.filter(t => t > now - 120000); }
+    started(now = Date.now()) { this.trim(now); this.starts.push(now); this.updatedAt = now; }
+    cap() { return this.probe ?? this.safe; }
+    next(now = Date.now()) {
+      let d = this.blocked, cap = this.cap(); if (cap == null || cap < 1) return d;
+      const a = this.starts.filter(t => t > now - 60000).sort((x,y)=>x-y);
+      if (a.length >= cap) d = Math.max(d, a[Math.max(0, a.length - Math.floor(cap))] + 60000 + PACING_BUFFER);
+      return d;
+    }
+    infer(now = Date.now()) {
+      this.trim(now); const a = this.starts.filter(t => t > now - 60000).sort((x,y)=>x-y);
+      if (a.length < 12) return null; const span = Math.max(1, now - a[0]); if (span < 30000) return null;
+      return Math.max(a.length, Math.ceil(a.length * 60000 / Math.min(60000, span)));
+    }
+    maybeProbe(now = Date.now()) {
+      if (!this.proven || this.probe != null || now < this.freezeUntil || now - this.lastLimited < PROBE_FREEZE || this.safe == null || this.clean < 60 || !this.firstClean || now - this.firstClean < 90000) return;
+      let n = this.unsafe != null && this.unsafe > this.safe + 1 ? Math.min(this.unsafe - 1, this.safe + Math.max(1, Math.ceil((this.unsafe - this.safe) * .25))) : Math.ceil(this.safe * 1.05);
+      if (n <= this.safe) return; this.probe = n; this.probeStarted = now; this.probeGood = 0; this.clean = 0; this.firstClean = 0; this.updatedAt = now;
+    }
+    success(now = Date.now()) {
+      if (this.safe == null) return; if (!this.firstClean) this.firstClean = now; this.clean++;
+      if (!this.proven) {
+        if (this.clean >= 60 && now - this.firstClean >= 120000) { this.proven = true; this.confidence = Math.max(this.confidence,.72); this.clean=0; this.firstClean=0; this.freezeUntil=Math.max(this.freezeUntil,now+60000); }
+      } else if (this.probe != null) {
+        this.probeGood++; if (this.probeGood >= 60 && now - this.probeStarted >= 120000) { this.safe=this.probe; this.probe=null; this.probeGood=0; this.clean=0; this.firstClean=0; this.confidence=Math.min(1,this.confidence+.1); this.freezeUntil=now+60000; }
+      } else this.maybeProbe(now);
+      this.updatedAt = now;
+    }
+    limited(ms, now = Date.now()) {
+      const probing = this.probe, inferred = this.infer(now);
+      if (probing != null) this.unsafe = this.unsafe == null ? probing : Math.min(this.unsafe, probing);
+      else if (inferred != null) this.unsafe = this.unsafe == null ? inferred : Math.min(this.unsafe, inferred);
+      if (this.safe == null) { const u=this.unsafe ?? inferred; if (u != null) this.safe=Math.max(1,Math.floor((u-1)*.80)); }
+      else if (probing == null) { const c=this.unsafe==null?this.safe:Math.min(this.safe,this.unsafe-1); this.safe=Math.max(1,Math.floor(c*.90)); }
+      this.probe=null; this.probeGood=0; this.clean=0; this.firstClean=0; this.proven=false; this.lastLimited=now; this.freezeUntil=Math.max(this.freezeUntil,now+PROBE_FREEZE); this.confidence=Math.max(.1,this.confidence-.15);
+      this.blocked=Math.max(this.blocked,now+ms+PACING_BUFFER,now+5000,this.next(now)); this.updatedAt=now;
+    }
+    mode(now = Date.now()) { return now<this.blocked?"cooldown":this.probe!=null?"probing":now<this.freezeUntil?"stabilizing":this.proven?"learned":this.safe==null?"observing":"learning"; }
+    snapshot() { return { starts:this.starts, blocked:this.blocked, safe:this.safe, unsafe:this.unsafe, proven:this.proven, confidence:this.confidence, lastLimited:this.lastLimited, freezeUntil:this.freezeUntil, updatedAt:this.updatedAt }; }
   }
 
-  function replaceRuntime(source) {
-    const startMarker = '  const PACING_RUNTIME_SOURCE = "';
-    const endMarker = '  function patchPacing(source) {';
-    const start = source.indexOf(startMarker);
-    const end = source.indexOf(endMarker, start + startMarker.length);
-    if (start < 0 || end < 0 || end <= start) throw new Error("Could not patch adaptive pacing runtime");
-    const replacement = `  const PACING_RUNTIME_SOURCE = ${JSON.stringify(SMART_RUNTIME_SOURCE)};\n\n`;
-    return source.slice(0, start) + replacement + source.slice(end);
-  }
+`;
 
-  function patchBaseSource(source) {
+  function patch(source) {
     let out = String(source);
-
-    out = replaceOnce(
-      out,
-      'const PLUGIN_VERSION = "1.1.7-shiggy";',
-      'const PLUGIN_VERSION = "1.2.0-shiggy";',
-      "plugin version",
-    );
-
-    out = replaceRuntime(out);
-
-    const insertMarker = '    return out;\n  }\n\n  function portSource(source) {';
-    const draftPatch = `    exact(
-      '    const [selected, setSelected] = React.useState({});',
-      '    const [selected, setSelected] = React.useState(() => { try { const accountId = purgeAccountId(); const draft = storage.shiggyPurgeDraftTargets?.[accountId]; return draft && typeof draft === "object" && !Array.isArray(draft) ? clone(draft) : {}; } catch { return {}; } });',
-      "persistent target draft init",
-    );
-    exact(
-      '    const [, render] = React.useReducer(value => value + 1, 0);\\n\\n    React.useEffect(() => {',
-      '    const [, render] = React.useReducer(value => value + 1, 0);\\n\\n    React.useEffect(() => {\\n      try {\\n        const accountId = purgeAccountId();\\n        if (accountId) {\\n          const drafts = { ...(storage.shiggyPurgeDraftTargets ?? {}) };\\n          if (Object.keys(selected).length) drafts[accountId] = clone(selected);\\n          else delete drafts[accountId];\\n          storage.shiggyPurgeDraftTargets = drafts;\\n        }\\n      } catch {}\\n    }, [selected]);\\n\\n    React.useEffect(() => {',
-      "persistent target draft save",
-    );
+    out = once(out, "1.2.0-shiggy", "1.2.1-shiggy", "version");
+    out = once(out, "purge-tools-shiggy-v1.2.0-base.js", "purge-tools-shiggy-v1.2.1-base.js", "source label");
+    out = rex(out, '  const PACING_VERSION = 4;\n', '  const PACING_VERSION = 5;\n', "pacing version");
+    out = rex(out, '  const PROBE_FREEZE = 600000;\n', '  const PROBE_FREEZE = 180000;\n', "probe freeze");
+    out = rex(out, '  const pacingStart = kind => kind === "read" ? 400 : 1200;\n', '  const pacingStart = kind => kind === "read" ? 400 : 1400;\n', "start pace");
+    out = rinsert(out, '  class PurgeMetrics {\n', SHARED_CLASS, "shared governor class");
+    out = rex(out,
+      '      this.lanes = new Map();\n      this.aliases = new Map();\n',
+      '      this.lanes = new Map();\n      this.aliases = new Map();\n      this.resources = new Map();\n', "resource map");
+    out = rex(out,
+      '      for (const [key, value] of Object.entries(saved.aliases ?? {})) if (this.lanes.has(value)) this.aliases.set(key, value);\n',
+      '      for (const [key, value] of Object.entries(saved.aliases ?? {})) if (this.lanes.has(value)) this.aliases.set(key, value);\n      for (const [key, value] of Object.entries(saved.resources ?? {})) if (value?.updatedAt > Date.now() - PACING_TTL || value?.blocked > Date.now()) this.resources.set(key, new SharedResourceGovernor(value));\n', "load resources");
+    out = rex(out,
+      '      this.activeLane = null;\n',
+      '      this.activeLane = null;\n      this.activeResource = null;\n', "active resource");
+    out = rinsert(out, '    lane(identity, kind) {\n', '    resource(identity) { if (!this.resources.has(identity.major)) this.resources.set(identity.major, new SharedResourceGovernor()); return this.resources.get(identity.major); }\n', "resource accessor");
+    out = rex(out,
+      '      return Math.max(this.operationLanes.get(operation)?.effectiveDelay() ?? pacingStart("modify"), this.metrics.pacingMs[operation] ?? 0);\n',
+      '      const c=this.activeResource?.cap(); return Math.max(this.operationLanes.get(operation)?.effectiveDelay() ?? pacingStart("modify"), this.metrics.pacingMs[operation] ?? 0, c ? 60000/c : 0);\n', "ETA shared pace");
+    out = rex(out,
+      '        aliases: Object.fromEntries(this.aliases),\n        lanes: Object.fromEntries([...this.lanes.entries()].map(([key, lane]) => [key, lane.snapshot()])),\n',
+      '        aliases: Object.fromEntries(this.aliases),\n        lanes: Object.fromEntries([...this.lanes.entries()].map(([key, lane]) => [key, lane.snapshot()])),\n        resources: Object.fromEntries([...this.resources.entries()].map(([key, resource]) => [key, resource.snapshot()])),\n', "persist resources");
+    out = rex(out,
+      '      const queueKey = `${kind}:${identity.major}`;\n',
+      '      const queueKey = identity.major;\n', "shared resource queue");
+    out = rex(out,
+      '      let lane = this.lane(identity, kind);\n      for (;;) {\n',
+      '      let lane = this.lane(identity, kind);\n      const resource = this.resource(identity);\n      for (;;) {\n', "request resource");
+    out = rex(out,
+      '        this.activeLane = lane;\n        const now = Date.now();\n        const blockedUntil = Math.max(lane.blocked, this.globalUntil);\n        const deadline = Math.max(lane.nextAt, blockedUntil);\n',
+      '        this.activeLane = lane; this.activeResource = resource;\n        const now = Date.now();\n        const hardBlocked = Math.max(lane.blocked, resource.blocked, this.globalUntil);\n        const deadline = Math.max(lane.nextAt, hardBlocked, resource.next(now));\n', "shared deadline");
+    out = rex(out,
+      '          const reason = blockedUntil > now ? "cooldown" : "pacing";\n',
+      '          const reason = hardBlocked > now ? "cooldown" : "pacing";\n', "wait reason");
+    out = rex(out,
+      '          if (blockedUntil - now >= PACING_LONG_WAIT && !this.control.paused && blockedUntil > (this.longWaitAcknowledged ?? 0)) {\n            this.longWaitAcknowledged = blockedUntil;\n            this.hold(`Long Discord cooldown. Paused; requests can resume after ${new Date(blockedUntil).toLocaleTimeString()}.`);\n',
+      '          if (hardBlocked - now >= PACING_LONG_WAIT && !this.control.paused && hardBlocked > (this.longWaitAcknowledged ?? 0)) {\n            this.longWaitAcknowledged = hardBlocked;\n            this.hold(`Long Discord cooldown. Paused; requests can resume after ${new Date(hardBlocked).toLocaleTimeString()}.`);\n', "long wait");
+    out = rex(out,
+      '        const changedBlock = Math.max(lane.blocked, this.globalUntil);\n',
+      '        const changedBlock = Math.max(lane.blocked, resource.blocked, resource.next(afterGate), this.globalUntil);\n', "post gate shared block");
+    out = rex(out,
+      '        const requestStart = Date.now();\n        this.metrics.request(identity.operation);\n',
+      '        const requestStart = Date.now();\n        resource.started(requestStart);\n        this.metrics.request(identity.operation);\n', "shared start tracking");
+    out = rex(out,
+      '          lane.limited(ms, scope);\n          if (global) this.globalUntil = Math.max(this.globalUntil, Date.now() + ms + PACING_BUFFER);\n          this.metrics.limit(identity.operation, scope, ms, error, lane);\n',
+      '          this.metrics.limit(identity.operation, scope, ms, error, lane);\n          if (scope === "shared") { resource.limited(ms); if (lane.probing) { lane.currentDelay=Math.max(lane.previousSafe,lane.safeDelay); lane.probing=false; lane.probeSuccesses=0; lane.cleanSuccesses=0; lane.firstCleanAt=0; } lane.probeFreezeUntil=Math.max(lane.probeFreezeUntil,Date.now()+PROBE_FREEZE); } else lane.limited(ms, scope);\n          if (global) this.globalUntil = Math.max(this.globalUntil, Date.now() + ms + PACING_BUFFER);\n', "shared 429 handling");
+    out = rex(out,
+      '          if (this.limitTimes.length >= 8) this.hold("Discord is repeatedly rate limiting this purge. Paused with progress saved; copy the test report before resuming.");\n',
+      '          if (this.limitTimes.length >= 6) this.hold("Discord is repeatedly rate limiting this purge. Paused with progress saved; copy the test report before resuming.");\n', "circuit breaker");
+    out = rex(out,
+      '        lane.success(headersAvailable);\n        this.metrics.observePace(identity.operation, lane.effectiveDelay());\n',
+      '        lane.success(headersAvailable);\n        resource.success();\n        this.metrics.observePace(identity.operation, lane.effectiveDelay());\n', "shared success");
+    out = rex(out,
+      '        current_pacing_ms: Math.ceil(lane?.effectiveDelay(now) ?? pacingStart("modify")),\n        controller_mode: lane?.mode(now) ?? "initializing",\n',
+      '        current_pacing_ms: Math.ceil(Math.max(lane?.effectiveDelay(now) ?? pacingStart("modify"), this.rate.activeResource?.cap() ? 60000/this.rate.activeResource.cap() : 0)),\n        controller_mode: this.rate.activeResource?.safe != null ? this.rate.activeResource.mode(now) : lane?.mode(now) ?? "initializing",\n', "reported pace");
+    out = rex(out,
+      '        probe_successes: lane?.probing ? lane.probeSuccesses : 0,\n        limits_last_10m: this.rate.limitTimes.filter(time => time > now - 600000).length,\n        active_resource_lanes: this.rate.lanes.size,\n',
+      '        probe_successes: this.rate.activeResource?.probe != null ? this.rate.activeResource.probeGood : lane?.probing ? lane.probeSuccesses : 0,\n        shared_safe_per_min: this.rate.activeResource?.safe == null ? null : Math.floor(this.rate.activeResource.safe),\n        shared_unsafe_per_min: this.rate.activeResource?.unsafe == null ? null : Math.floor(this.rate.activeResource.unsafe),\n        shared_controller_mode: this.rate.activeResource?.mode(now) ?? "observing",\n        limits_last_10m: this.rate.limitTimes.filter(time => time > now - 600000).length,\n        active_resource_lanes: this.rate.resources.size,\n', "shared report");
+    out = rex(out,
+      '      React.createElement(Txt, null, `Current spacing: ${(report.current_pacing_ms / 1000).toFixed(2)}s · learned safe: ${report.learned_safe_ms == null ? "learning" : (report.learned_safe_ms / 1000).toFixed(2) + "s"}`),\n',
+      '      React.createElement(Txt, null, `Current spacing: ${(report.current_pacing_ms / 1000).toFixed(2)}s · learned route-safe: ${report.learned_safe_ms == null ? "learning" : (report.learned_safe_ms / 1000).toFixed(2) + "s"}`),\n      report.shared_safe_per_min != null ? React.createElement(Txt, null, `Shared rolling governor: ${report.shared_safe_per_min}/min safe · ${report.shared_unsafe_per_min ?? "?"}/min unsafe · ${report.shared_controller_mode}`) : null,\n', "shared UI");
     return out;
   }
-
-  function portSource(source) {`;
-    out = replaceOnce(out, insertMarker, draftPatch, "persistent target draft hook");
-
-    return out;
-  }
-
-  async function loadInner() {
-    const source = patchBaseSource(await fetchBaseSource());
-    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.2.0-base.js`);
-    const raw = factory(V);
-    const resolved = typeof raw === "function" ? raw() : raw;
+  async function load() {
+    const source = patch(await fetchBase());
+    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.2.1-wrapper.js`);
+    const raw = factory(V), resolved = typeof raw === "function" ? raw() : raw;
     return await Promise.resolve(resolved?.default ?? resolved ?? {});
   }
-
-  function ensureInner() {
-    if (inner) return Promise.resolve(inner);
-    if (loadPromise) return loadPromise;
-
-    innerError = null;
-    loadPromise = loadInner()
-      .then(plugin => {
-        inner = plugin;
-        if (started) {
-          try { inner?.onLoad?.(); }
-          catch (error) { throw new Error(`Inner start failed: ${error?.message ?? error}`); }
-        }
-        notify();
-        return inner;
-      })
-      .catch(error => {
-        innerError = error;
-        inner = null;
-        loadPromise = null;
-        notify();
-        toast(`Purge Tools failed to load: ${error?.message ?? error}`);
-        throw error;
-      });
-
-    loadPromise.catch(() => {});
-    return loadPromise;
+  function ensure() {
+    if (inner) return Promise.resolve(inner); if (loadPromise) return loadPromise; innerError = null;
+    loadPromise = load().then(p => { inner=p; if (started) inner?.onLoad?.(); notify(); return inner; }).catch(e => { innerError=e; inner=null; loadPromise=null; notify(); toast(`Purge Tools failed to load: ${e?.message ?? e}`); throw e; });
+    loadPromise.catch(()=>{}); return loadPromise;
   }
-
-  function wrapperCurrentAccountId() {
-    try {
-      const store = V.metro.findByProps?.("getCurrentUser");
-      const id = store?.getCurrentUser?.()?.id;
-      return id ? String(id) : "";
-    } catch { return ""; }
+  function accountId() { try { return String(V.metro.findByProps?.("getCurrentUser")?.getCurrentUser?.()?.id ?? ""); } catch { return ""; } }
+  function Settings() {
+    const [,render]=React.useReducer(v=>v+1,0);
+    React.useEffect(()=>{const f=()=>render();listeners.add(f);ensure();return()=>listeners.delete(f);},[]);
+    if (typeof inner?.settings === "function") return React.createElement(inner.settings);
+    return React.createElement(RN.View,{style:{flex:1,padding:16,backgroundColor:"#111214"}},React.createElement(RN.Text,{style:{color:"#F2F3F5"}},innerError?`Could not load Purge Tools: ${innerError?.message ?? innerError}`:"Loading Purge Tools…"));
   }
-
-  function hasInterruptedAutoResume() {
-    try {
-      if (storage.autoResumeInterrupted !== true) return false;
-      const accountId = wrapperCurrentAccountId();
-      if (!accountId) return false;
-      return !!storage.activePurgeJobs?.[accountId];
-    } catch {
-      return false;
-    }
-  }
-
-  function SettingsBridge() {
-    const [, render] = React.useReducer(value => value + 1, 0);
-
-    React.useEffect(() => {
-      const listener = () => render();
-      listeners.add(listener);
-      ensureInner();
-      return () => listeners.delete(listener);
-    }, []);
-
-    if (typeof inner?.settings === "function") {
-      return React.createElement(inner.settings);
-    }
-
-    const Pressable = RN.Pressable ?? RN.TouchableOpacity;
-    return React.createElement(
-      RN.View,
-      { style: { flex: 1, padding: 16, backgroundColor: "#111214" } },
-      React.createElement(
-        RN.Text,
-        { style: { color: "#F2F3F5", fontSize: 16 } },
-        innerError
-          ? `Could not load Purge Tools: ${innerError?.message ?? innerError}`
-          : "Loading Purge Tools…",
-      ),
-      innerError ? React.createElement(
-        Pressable,
-        {
-          onPress: () => {
-            innerError = null;
-            loadPromise = null;
-            ensureInner();
-            render();
-          },
-          style: {
-            marginTop: 14,
-            padding: 11,
-            borderRadius: 8,
-            backgroundColor: "#5865F2",
-            alignItems: "center",
-          },
-        },
-        React.createElement(
-          RN.Text,
-          { style: { color: "#F2F3F5", fontWeight: "700" } },
-          "Retry",
-        ),
-      ) : null,
-    );
-  }
-
   return {
-    onLoad() {
-      started = true;
-      if (hasInterruptedAutoResume()) ensureInner();
-    },
-    onUnload() {
-      started = false;
-      try { inner?.onUnload?.(); } catch {}
-      listeners.clear();
-    },
-    settings: SettingsBridge,
+    onLoad(){started=true;if(storage.autoResumeInterrupted===true&&accountId()&&storage.activePurgeJobs?.[accountId()])ensure();},
+    onUnload(){started=false;try{inner?.onUnload?.();}catch{}listeners.clear();},
+    settings:Settings,
   };
 })()

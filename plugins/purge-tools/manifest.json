@@ -1,13 +1,13 @@
 {
   "name": "Purge Tools",
-  "description": "ShiggyCord Purge Tools with self-learning adaptive scheduling, confidence ETA, persistent target drafts, local test reports, media protection, and account-scoped resume checkpoints.",
+  "description": "ShiggyCord Purge Tools with self-learning route pacing, a shared rolling-window governor, confidence ETA, persistent target drafts, local test reports, media protection, and account-scoped resume checkpoints.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "5de53f62c86b797fc735a28b50dc574381814639",
+  "hash": "985768f5bd2abf77095cc21300634730122e5a7a",
   "vendetta": {
     "icon": "TrashIcon"
   }
