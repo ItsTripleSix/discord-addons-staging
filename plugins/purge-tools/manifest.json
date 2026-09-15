@@ -1,13 +1,13 @@
 {
   "name": "Purge Tools",
-  "description": "ShiggyCord Purge Tools with adaptive pacing, live cleanup ETA, local test reports, media protection, and account-scoped resume checkpoints.",
+  "description": "ShiggyCord Purge Tools with adaptive pacing, live cleanup ETA, persistent target drafts, local test reports, media protection, and account-scoped resume checkpoints.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "8cfe88df48c6688c3b7a94b595a3b0a7df2d7af0",
+  "hash": "dd21737a09eca3fa4a003381b67af643571df240",
   "vendetta": {
     "icon": "TrashIcon"
   }
