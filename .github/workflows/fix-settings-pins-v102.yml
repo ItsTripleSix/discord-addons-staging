@@ -30,47 +30,43 @@ jobs:
               Path("plugins/settings-pins/index.js"),
               Path("clients/shiggycord/plugins/settings-pins/index.js"),
           ]
-
-          before = '''        React.createElement(RN.Switch, {
-          key: "toggle",
-          value: pinned,
-          ...(ToggleRow ? { pointerEvents: "none" } : {}),
-          onValueChange: value => {
-            setPinned(id, value);
-            refresh();
-          },
-        }),'''
-
-          after = '''        React.createElement(RN.View, {
-          key: "toggle",
-          pointerEvents: "none",
-          style: {
-            width: 46,
-            height: 28,
-            borderRadius: 14,
-            padding: 3,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: pinned ? "flex-end" : "flex-start",
-            backgroundColor: pinned ? C.brand : "#4e5058",
-          },
-        }, React.createElement(RN.View, {
-          style: {
-            width: 22,
-            height: 22,
-            borderRadius: 11,
-            backgroundColor: "#ffffff",
-          },
-        })),'''
+          replacement = "\n".join([
+              '        React.createElement(RN.View, {',
+              '          key: "toggle",',
+              '          pointerEvents: "none",',
+              '          style: {',
+              '            width: 46,',
+              '            height: 28,',
+              '            borderRadius: 14,',
+              '            padding: 3,',
+              '            flexDirection: "row",',
+              '            alignItems: "center",',
+              '            justifyContent: pinned ? "flex-end" : "flex-start",',
+              '            backgroundColor: pinned ? C.brand : "#4e5058",',
+              '          },',
+              '        }, React.createElement(RN.View, {',
+              '          style: {',
+              '            width: 22,',
+              '            height: 22,',
+              '            borderRadius: 11,',
+              '            backgroundColor: "#ffffff",',
+              '          },',
+              '        })),',
+          ])
 
           for path in paths:
               s = path.read_text(encoding="utf-8")
               if s.count('const VERSION = "1.0.1-shiggy";') != 1:
                   raise SystemExit(f"{path}: unexpected version marker")
-              if s.count(before) != 1:
-                  raise SystemExit(f"{path}: expected one native toggle block, found {s.count(before)}")
+              start_marker = '        React.createElement(RN.Switch, {'
+              tail_marker = '        }),\n      ]));'
+              start = s.find(start_marker)
+              tail = s.find(tail_marker, start)
+              if start < 0 or tail < 0:
+                  raise SystemExit(f"{path}: native toggle block not found")
+              switch_end = tail + len('        }),')
+              s = s[:start] + replacement + s[switch_end:]
               s = s.replace('const VERSION = "1.0.1-shiggy";', 'const VERSION = "1.0.2-shiggy";', 1)
-              s = s.replace(before, after, 1)
               path.write_text(s, encoding="utf-8")
           PY
 
