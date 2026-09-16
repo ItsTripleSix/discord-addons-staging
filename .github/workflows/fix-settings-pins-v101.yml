@@ -1,0 +1,98 @@
+name: Fix Settings Pins v1.0.1
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-settings-pins-v101.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging
+        uses: actions/checkout@v4
+
+      - name: Verify baseline
+        run: |
+          test "$(git hash-object plugins/settings-pins/index.js)" = "ebfe485ef7400c76417645ef9c8baacfdb224065"
+          cmp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          grep -q 'const VERSION = "1.0.0-shiggy";' plugins/settings-pins/index.js
+
+      - name: Patch toggle interaction
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path('plugins/settings-pins/index.js'),
+              Path('clients/shiggycord/plugins/settings-pins/index.js'),
+          ]
+
+          def once(text, before, after, label):
+              n = text.count(before)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {n}')
+              return text.replace(before, after, 1)
+
+          for path in paths:
+              s = path.read_text(encoding='utf-8')
+              s = once(
+                  s,
+                  '  const VERSION = "1.0.0-shiggy";\n  const SECTION = "ShiggyCord";',
+                  '  const VERSION = "1.0.1-shiggy";\n  const SECTION = "ShiggyCord";',
+                  'version',
+              )
+              s = once(
+                  s,
+                  '  function Settings() {\n    const [, refresh] = React.useReducer(value => value + 1, 0);',
+                  '  function Settings() {\n    const [, refresh] = React.useReducer(value => value + 1, 0);\n    const ToggleRow = RN.Pressable ?? RN.TouchableOpacity;',
+                  'toggle row component',
+              )
+              s = once(
+                  s,
+                  '      children.push(React.createElement(RN.View, {\n        key: id,\n        style: {',
+                  '      const Row = ToggleRow ?? RN.View;\n      children.push(React.createElement(Row, {\n        key: id,\n        ...(ToggleRow ? {\n          onPress: () => {\n            setPinned(id, !pinned);\n            refresh();\n          },\n          accessibilityRole: "switch",\n          accessibilityState: { checked: pinned },\n        } : {}),\n        style: {',
+                  'pressable row',
+              )
+              s = once(
+                  s,
+                  '        React.createElement(RN.Switch, {\n          key: "toggle",\n          value: pinned,\n          onValueChange: value => {\n            setPinned(id, value);\n            refresh();\n          },\n        }),',
+                  '        React.createElement(RN.Switch, {\n          key: "toggle",\n          value: pinned,\n          ...(ToggleRow ? { pointerEvents: "none" } : {}),\n          onValueChange: value => {\n            setPinned(id, value);\n            refresh();\n          },\n        }),',
+                  'switch touch routing',
+              )
+              path.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Validate and update manifests
+        run: |
+          cmp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          node --check plugins/settings-pins/index.js
+          grep -q 'const VERSION = "1.0.1-shiggy";' plugins/settings-pins/index.js
+          grep -q 'accessibilityRole: "switch"' plugins/settings-pins/index.js
+          HASH="$(git hash-object plugins/settings-pins/index.js)"
+          export HASH
+          python3 - <<'PY'
+          import json, os
+          for path in ['plugins/settings-pins/manifest.json', 'clients/shiggycord/plugins/settings-pins/manifest.json']:
+              with open(path, 'r', encoding='utf-8') as f:
+                  data = json.load(f)
+              data['description'] = "Pin any installed plugin's settings directly into ShiggyCord using ShiggyCord's own settings registry, with reliable row-based toggle controls."
+              data['hash'] = os.environ['HASH']
+              with open(path, 'w', encoding='utf-8') as f:
+                  json.dump(data, f, indent=2, ensure_ascii=False)
+                  f.write('\n')
+          PY
+          cmp plugins/settings-pins/manifest.json clients/shiggycord/plugins/settings-pins/manifest.json
+          test "$(python3 -c 'import json; print(json.load(open("plugins/settings-pins/manifest.json"))["hash"])')" = "$HASH"
+
+      - name: Commit fix
+        run: |
+          git config user.name "ItsTripleSix"
+          git config user.email "onlytriplesix@protonmail.com"
+          git add plugins/settings-pins/index.js plugins/settings-pins/manifest.json clients/shiggycord/plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/manifest.json
+          git diff --cached --check
+          git commit -m "Fix Settings Pins toggle interaction"
+          git push origin HEAD:main
