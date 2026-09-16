@@ -1,0 +1,56 @@
+name: Publish Settings Pins v1.0.7 note
+
+on:
+  push:
+    paths:
+      - .github/workflows/settings-pins-v107-note.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update note and validate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('plugins/settings-pins/index.js')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('const VERSION = "1.0.6-shiggy";', 'const VERSION = "1.0.7-shiggy";')
+          old = 'Choose which plugin settings appear directly in ShiggyCord. Changes save immediately. ReShiggy is currently required to rebuild the main Settings list.'
+          new = 'Choose which plugin settings appear directly in ShiggyCord. After turning a pin on or off, use ReShiggy for the change to take effect.'
+          if old not in s:
+              raise SystemExit('expected note not found')
+          s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+          PY
+          cp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          node --check plugins/settings-pins/index.js
+          cmp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          grep -q 'const VERSION = "1.0.7-shiggy";' plugins/settings-pins/index.js
+          grep -q 'After turning a pin on or off, use ReShiggy for the change to take effect.' plugins/settings-pins/index.js
+          HASH="$(git hash-object plugins/settings-pins/index.js)"
+          export HASH
+          python3 - <<'PY'
+          import json, os
+          for path in ['plugins/settings-pins/manifest.json','clients/shiggycord/plugins/settings-pins/manifest.json']:
+              with open(path, encoding='utf-8') as f:
+                  data = json.load(f)
+              data['hash'] = os.environ['HASH']
+              with open(path, 'w', encoding='utf-8') as f:
+                  json.dump(data, f, indent=2)
+                  f.write('\n')
+          PY
+          cmp plugins/settings-pins/manifest.json clients/shiggycord/plugins/settings-pins/manifest.json
+          test "$(python3 -c 'import json; print(json.load(open("plugins/settings-pins/manifest.json"))["hash"])')" = "$HASH"
+      - name: Commit
+        run: |
+          git config user.name "ItsTripleSix"
+          git config user.email "onlytriplesix@protonmail.com"
+          git add plugins/settings-pins clients/shiggycord/plugins/settings-pins
+          git diff --cached --check
+          git commit -m "Settings Pins v1.0.7 clarify ReShiggy requirement"
+          git push
