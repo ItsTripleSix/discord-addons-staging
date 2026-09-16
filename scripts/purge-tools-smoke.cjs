@@ -6,6 +6,7 @@ const base122Path = process.argv[3] || "/tmp/purge-tools-base122.js";
 const base121Path = process.argv[4] || "/tmp/purge-tools-base121.js";
 const base120Path = process.argv[5] || "/tmp/purge-tools-base120.js";
 const base117Path = process.argv[6] || "/tmp/purge-tools-base117.js";
+const stableCorePath = process.argv[7] || "/tmp/purge-tools-stable-core.js";
 
 const read = p => fs.readFileSync(p, "utf8");
 const context = {
@@ -16,11 +17,7 @@ const context = {
 function expose(source, fnName, label) {
   const re = /(\n\s*return\s*\{\s*\n\s*)(onLoad\s*\(\s*\)\s*\{)/g;
   const matches = [...source.matchAll(re)];
-  if (matches.length !== 1) {
-    console.error(`${label} instrumentation candidates: ${matches.length}`);
-    console.error(source.slice(Math.max(0, source.length - 1200)));
-    throw new Error(`Could not instrument ${label}`);
-  }
+  if (matches.length !== 1) throw new Error(`Could not instrument ${label}; candidates=${matches.length}`);
   const match = matches[0];
   const i = match.index;
   const replacement = `${match[1]}__debugPatch: ${fnName},\n    ${match[2]}`;
@@ -51,25 +48,14 @@ function parse(source, label) {
   console.log(`${label} syntax PASS (${source.length} bytes)`);
 }
 
-function reportUnicode(source, label) {
-  const re = /\\+u[^\s'"`;,)}\]]*/g;
-  const hits = [];
-  let match;
-  while ((match = re.exec(source)) && hits.length < 50) {
-    const before = source.slice(Math.max(0, match.index - 50), match.index);
-    const after = source.slice(match.index, Math.min(source.length, match.index + 90));
-    hits.push((before + after).replace(/\n/g, "\\n"));
+function fixFriendlyBridgeEscaping(source) {
+  const before = '  }\\\\n\\\\n  function portSource(source) {';
+  const after = '  }\\n\\n  function portSource(source) {';
+  const first = source.indexOf(before);
+  if (first < 0 || source.indexOf(before, first + before.length) >= 0) {
+    throw new Error(`Expected exactly one friendly bridge escape defect; first=${first}`);
   }
-  if (hits.length) {
-    console.log(`\n${label}: ${hits.length} backslash-u candidates`);
-    hits.forEach((hit, i) => console.log(`${i + 1}: ${hit}`));
-  }
-}
-
-function reportAround(source, needle, label, radius = 1800) {
-  const i = source.indexOf(needle);
-  console.log(`\n${label}: ${needle} at ${i}`);
-  if (i >= 0) console.log(source.slice(Math.max(0, i - radius), Math.min(source.length, i + radius)));
+  return source.slice(0, first) + after + source.slice(first + before.length);
 }
 
 const outer = read(wrapperPath);
@@ -79,26 +65,30 @@ const patch126 = expose(outer, "patch", "stage0-current-wrapper");
 const stage1 = patch126(read(base122Path));
 fs.writeFileSync("/tmp/purge-tools-stage1.js", stage1);
 parse(stage1, "stage1-v122-wrapper-after-v126");
-reportUnicode(stage1, "stage1");
 
 const patch122 = expose(stage1, "patch", "stage1-v122-wrapper-after-v126");
 const stage2 = patch122(read(base121Path));
 fs.writeFileSync("/tmp/purge-tools-stage2.js", stage2);
 parse(stage2, "stage2-v121-wrapper-after-v122");
-reportUnicode(stage2, "stage2");
 
 const patch121 = expose(stage2, "patch", "stage2-v121-wrapper-after-v122");
-const stage3 = patch121(read(base120Path));
+let stage3 = patch121(read(base120Path));
+fs.writeFileSync("/tmp/purge-tools-stage3-before-fix.js", stage3);
+parse(stage3, "stage3-v120-wrapper-after-v121-before-fix");
+stage3 = fixFriendlyBridgeEscaping(stage3);
 fs.writeFileSync("/tmp/purge-tools-stage3.js", stage3);
-parse(stage3, "stage3-v120-wrapper-after-v121");
-reportUnicode(stage3, "stage3");
-reportAround(stage3, "const draftPatch", "stage3 draftPatch");
-reportAround(stage3, "friendly progress card", "stage3 friendly progress patch");
+parse(stage3, "stage3-v120-wrapper-after-v121-fixed");
 
-const patch120 = expose(stage3, "patchBaseSource", "stage3-v120-wrapper-after-v121");
+const patch120 = expose(stage3, "patchBaseSource", "stage3-v120-wrapper-after-v121-fixed");
 const stage4 = patch120(read(base117Path));
 fs.writeFileSync("/tmp/purge-tools-stage4.js", stage4);
 parse(stage4, "stage4-v117-wrapper-after-v120");
-reportUnicode(stage4, "stage4");
 
-console.log("Purge Tools full generated-source chain PASS");
+const port117 = expose(stage4, "portSource", "stage4-v117-wrapper-after-v120");
+let stage5 = port117(read(stableCorePath));
+stage5 = stage5.replace('const PLUGIN_VERSION = "1.2.6-shiggy";', 'const PLUGIN_VERSION = "1.2.7-shiggy";');
+if (!stage5.includes('const PLUGIN_VERSION = "1.2.7-shiggy";')) throw new Error("Could not stamp v1.2.7 final version");
+fs.writeFileSync("/tmp/purge-tools-v127-flat.js", stage5);
+parse(stage5, "stage5-v127-flat-final");
+
+console.log("Purge Tools complete chain + flattened v1.2.7 PASS");
