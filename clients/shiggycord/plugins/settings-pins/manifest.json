@@ -1,13 +1,13 @@
 {
   "name": "Settings Pins",
-  "description": "Pin any installed plugin's settings directly into ShiggyCord with per-plugin persisted toggle state.",
+  "description": "Pin any installed plugin's settings directly into ShiggyCord with per-plugin persisted toggle state and live Settings refresh without ReShiggy.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "527b9aa026a8b33f5f78f498653badfe315a58b1",
+  "hash": "d6daaf481df12b3861238f946f34a7420bcf15ac",
   "vendetta": {
     "icon": "PuzzlePieceIcon"
   }
