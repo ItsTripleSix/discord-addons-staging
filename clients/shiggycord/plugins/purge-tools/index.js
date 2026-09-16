@@ -5,7 +5,7 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const BASE_URL = "https://raw.githubusercontent.com/ItsTripleSix/discord-addons-staging/10bcce8814bde3565fa3f6074b860c0f926df6cc/plugins/purge-tools/index.js";
-  const CACHE = "shiggyPurgeWrapperBase122v125";
+  const CACHE = "shiggyPurgeWrapperBase122v126";
   let inner = null, innerError = null, loadPromise = null, started = false;
   const listeners = new Set();
   const toast = text => { try { V.ui?.toasts?.showToast?.(String(text)); } catch {} };
@@ -59,9 +59,32 @@
     return source.slice(0, start) + "out = srex(out," + part.slice("out = rex(out,".length) + source.slice(end);
   }
 
+  function replaceEscapedUnicodeSequence(source, parts, value) {
+    let out = String(source);
+    let from = 0;
+    while (from < out.length) {
+      const pos = out.indexOf(parts[0], from);
+      if (pos < 0) break;
+      let start = pos;
+      while (start > 0 && out.charCodeAt(start - 1) === 92) start--;
+      if (start === pos) { from = pos + parts[0].length; continue; }
+      let cursor = pos + parts[0].length;
+      let matched = true;
+      for (let i = 1; i < parts.length; i++) {
+        const slashStart = cursor;
+        while (cursor < out.length && out.charCodeAt(cursor) === 92) cursor++;
+        if (cursor === slashStart || out.slice(cursor, cursor + parts[i].length) !== parts[i]) { matched = false; break; }
+        cursor += parts[i].length;
+      }
+      if (!matched) { from = pos + parts[0].length; continue; }
+      out = out.slice(0, start) + value + out.slice(cursor);
+      from = start + value.length;
+    }
+    return out;
+  }
+
   function literalizeUnicodeEscapes(source) {
     let out = String(source);
-    const b = String.fromCharCode(92);
     const replacements = [
       [["ud83d", "udfe2"], "🟢"],
       [["ud83d", "udd34"], "🔴"],
@@ -74,11 +97,7 @@
       [["u25b4"], "▴"],
       [["u25be"], "▾"],
     ];
-    for (const [parts, value] of replacements) {
-      const one = parts.map(part => b + part).join("");
-      const two = parts.map(part => b + b + part).join("");
-      out = out.split(two).join(value).split(one).join(value);
-    }
+    for (const [parts, value] of replacements) out = replaceEscapedUnicodeSequence(out, parts, value);
     return out;
   }
 
@@ -94,8 +113,8 @@
 
     out = switchRexForLabel(out, "clear pacing report");
     out = switchRexForLabel(out, "report wording");
-    out = replaceInsideCall(out, "version target", "1.2.2-shiggy", "1.2.5-shiggy");
-    out = replaceInsideCall(out, "source label target", "purge-tools-shiggy-v1.2.2-base.js", "purge-tools-shiggy-v1.2.5-base.js");
+    out = replaceInsideCall(out, "version target", "1.2.2-shiggy", "1.2.6-shiggy");
+    out = replaceInsideCall(out, "source label target", "purge-tools-shiggy-v1.2.2-base.js", "purge-tools-shiggy-v1.2.6-base.js");
     out = literalizeUnicodeEscapes(out);
 
     return out;
@@ -103,7 +122,7 @@
 
   async function load() {
     const source = patch(await fetchBase());
-    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.2.5-wrapper.js`);
+    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.2.6-wrapper.js`);
     const raw = factory(V), resolved = typeof raw === "function" ? raw() : raw;
     return await Promise.resolve(resolved?.default ?? resolved ?? {});
   }
