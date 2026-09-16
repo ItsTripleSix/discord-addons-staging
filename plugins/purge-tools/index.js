@@ -13,7 +13,7 @@
   const VERIFY_PASSES = 3;
   const TRANSIENT_RETRIES = 2;
   const TRANSIENT_RETRY_BASE_MS = 1000;
-  const PLUGIN_VERSION = "1.2.9-shiggy";
+  const PLUGIN_VERSION = "1.2.10-shiggy";
   const BULK_MAX = 100;
   const BULK_SAFE_AGE_MS = 14 * 24 * 60 * 60 * 1000 - 5 * 60 * 1000;
   const JOB_VERSION = 3;
@@ -2604,7 +2604,7 @@
         if (strictTargets.length) warnings.push(`${strictTargets.length} target${strictTargets.length === 1 ? " uses" : "s use"} Strict order.`);
         RN.Alert.alert(
           warnings.length ? "Start Moderator Purge?" : "Start Purge?",
-          `Permanently remove the selected messages/reactions from ${targets.length} target${targets.length === 1 ? "" : "s"}?${warnings.length ? `\n\nWARNING:\n${warnings.join("\n")}` : ""}${previewReady ? "\n\nThe completed preview snapshot will be used; initial discovery will be skipped." : ""}\n\nACCOUNT RISK:\nPurge Tools has worked fine for me, but use it at your own risk. I'm not responsible for account restrictions, suspensions, or bans.\n\nModerator actions are permission-checked per channel before requests are sent.`,
+          `Permanently remove the selected messages/reactions from ${targets.length} target${targets.length === 1 ? "" : "s"}?${warnings.length ? `\n\nWARNING:\n${warnings.join("\n")}` : ""}${previewReady ? "\n\nThe completed preview snapshot will be used; initial discovery will be skipped." : ""}\n\nModerator actions are permission-checked per channel before requests are sent.`,
           [
             { text: "Cancel", style: "cancel" },
             { text: warnings.length ? "START MODERATOR PURGE" : "Start Purge", style: "destructive", onPress: () => { try { startJob(prepareSpec()); } catch (error) { toast(error?.message ?? error); } } },
@@ -2628,11 +2628,6 @@
       React.createElement(Txt, { style: { fontSize: 22, fontWeight: "800" } }, "Purge Tools"),
       React.createElement(Txt, { style: { color: C.muted, fontSize: 12, marginTop: 2 } }, `Version ${PLUGIN_VERSION}`),
       React.createElement(Txt, { style: { color: C.muted, marginTop: 4, marginBottom: 12 } }, "Select DMs, channels, or entire servers. Every target has independent author, reaction, filter, and deletion-order settings."),
-
-      React.createElement(Card, { style: { borderColor: C.danger, marginBottom: 12 } },
-        React.createElement(Txt, { style: { color: C.danger, fontWeight: "800", fontSize: 16 } }, "Account risk — read before using"),
-        React.createElement(Txt, { style: { marginTop: 5, lineHeight: 19 } }, "Personally, Purge Tools has worked fine for me. Discord can still restrict or ban accounts for activity it considers abusive or automated. Use this tool at your own risk. I'm not responsible for account restrictions, suspensions, or bans."),
-      ),
 
       savedJob && !running ? React.createElement(Card, { style: { borderColor: C.brand } },
         React.createElement(Txt, { style: { fontWeight: "800", fontSize: 16 } }, "Interrupted purge available"),
