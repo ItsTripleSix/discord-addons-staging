@@ -1,13 +1,13 @@
 {
   "name": "Purge Tools",
-  "description": "ShiggyCord Purge Tools with self-learning route pacing, a shared rolling-window governor, confidence ETA, persistent target drafts, local test reports, media protection, and account-scoped resume checkpoints.",
+  "description": "ShiggyCord Purge Tools with conservative shared pacing, a 30/min shared cap, readable progress/status UI, confidence ETA, persistent target drafts, local reports, media protection, and account-scoped resume checkpoints.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "985768f5bd2abf77095cc21300634730122e5a7a",
+  "hash": "4260efd5304772c82dda906db7b62d83286fc5fd",
   "vendetta": {
     "icon": "TrashIcon"
   }
