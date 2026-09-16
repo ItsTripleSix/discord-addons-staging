@@ -48,9 +48,9 @@ function parse(source, label) {
   console.log(`${label} syntax PASS (${source.length} bytes)`);
 }
 
-function assertFinalFeatures(source) {
+function assertFinalFeatures(source, version = "1.2.8-shiggy") {
   const required = [
-    'const PLUGIN_VERSION = "1.2.7-shiggy";',
+    `const PLUGIN_VERSION = "${version}";`,
     'shared_hard_cap_per_min: 30',
     'report_version: 3',
     'Copy report',
@@ -61,6 +61,13 @@ function assertFinalFeatures(source) {
     'shared_bottleneck:',
     'route_pacing_ms:',
     'effective_pacing_ms:',
+    'const TRANSIENT_RETRIES = 2;',
+    'transient_errors:',
+    'recovered_transient_requests:',
+    'unresolved_failures:',
+    'recovered_failures:',
+    'runtime.unresolvedFailures.clear();',
+    'failureTaskKey(',
   ];
   const missing = required.filter(value => !source.includes(value));
   if (missing.length) throw new Error(`Flattened final is missing required features: ${missing.join(", ")}`);
@@ -82,9 +89,14 @@ function fixFriendlyBridgeEscaping(source) {
 const outer = read(wrapperPath);
 parse(outer, "stage0-current-plugin");
 
-if (outer.includes('const PLUGIN_VERSION = "1.2.7-shiggy";')) {
+if (outer.includes('const PLUGIN_VERSION = "1.2.8-shiggy";')) {
   assertFinalFeatures(outer);
-  console.log("Purge Tools flattened v1.2.7 smoke PASS");
+  console.log("Purge Tools flattened v1.2.8 smoke PASS");
+  process.exit(0);
+}
+
+if (outer.includes('const PLUGIN_VERSION = "1.2.7-shiggy";')) {
+  console.log("Historical flattened v1.2.7 detected; syntax only PASS");
   process.exit(0);
 }
 
@@ -109,8 +121,6 @@ parse(stage4, "stage4-v117-wrapper-after-v120");
 const port117 = expose(stage4, "portSource", "stage4-v117-wrapper-after-v120");
 let stage5 = port117(read(stableCorePath));
 stage5 = stage5.replace('const PLUGIN_VERSION = "1.2.6-shiggy";', 'const PLUGIN_VERSION = "1.2.7-shiggy";');
-assertFinalFeatures(stage5);
-fs.writeFileSync("/tmp/purge-tools-v127-flat.js", stage5);
 parse(stage5, "stage5-v127-flat-final");
 
-console.log("Purge Tools complete chain + flattened v1.2.7 PASS");
+console.log("Purge Tools historical chain PASS");
