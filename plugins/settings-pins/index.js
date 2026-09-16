@@ -8,7 +8,7 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const SELF_ID = String(V.plugin?.id ?? "");
-  const VERSION = "1.0.2-shiggy";
+  const VERSION = "1.0.3-shiggy";
   const SECTION = "ShiggyCord";
   const KEY_PREFIX = "ITS666_SETTINGS_PIN_";
 
@@ -21,7 +21,6 @@
     card: "#1e1f22",
     text: "#f2f3f5",
     muted: "#b5bac1",
-    brand: "#5865f2",
     border: "#3f4147",
   };
 
@@ -166,26 +165,17 @@
     return true;
   }
 
-  function setPinned(id, value) {
-    const pins = currentPins();
-    const has = pins.includes(id);
-    if (value && !has) pins.push(id);
-    if (!value && has) pins.splice(pins.indexOf(id), 1);
-    setPins(pins);
-    syncPins();
-  }
-
   function Settings() {
-    const [, refresh] = React.useReducer(value => value + 1, 0);
-    const ToggleRow = RN.Pressable ?? RN.TouchableOpacity;
+    initializeDefaults();
+    const [pins, setLocalPins] = React.useState(() => currentPins());
 
-    React.useEffect(() => {
-      initializeDefaults();
+    // Do not mutate Shiggy's live settings registry while this page is handling a
+    // toggle. The native switch controls local React state immediately, and the
+    // registry is reconciled only when leaving this page.
+    React.useEffect(() => () => {
       syncPins();
-      refresh();
     }, []);
 
-    const pins = currentPins();
     const plugins = Object.values(allPlugins())
       .filter(plugin => plugin?.id && plugin?.manifest?.name)
       .sort((a, b) => String(a.manifest.name).localeCompare(String(b.manifest.name)));
@@ -206,7 +196,7 @@
         React.createElement(RN.Text, {
           key: "refresh-note",
           style: { color: C.muted, marginTop: 6, fontSize: 12, lineHeight: 17 },
-        }, "After changing pins, back out of Settings and reopen it if the main list was already on screen."),
+        }, "Changes save immediately. Back out of Settings and reopen it to refresh the main settings list."),
       ]),
     ];
 
@@ -217,17 +207,8 @@
       let settingsAvailable = false;
       try { settingsAvailable = typeof V.plugins?.getSettings?.(id) === "function"; } catch {}
 
-      const Row = ToggleRow ?? RN.View;
-      children.push(React.createElement(Row, {
+      children.push(React.createElement(RN.View, {
         key: id,
-        ...(ToggleRow ? {
-          onPress: () => {
-            setPinned(id, !pinned);
-            refresh();
-          },
-          accessibilityRole: "switch",
-          accessibilityState: { checked: pinned },
-        } : {}),
         style: {
           backgroundColor: C.card,
           paddingHorizontal: 14,
@@ -259,27 +240,17 @@
                 ? "No settings page detected"
                 : "Disabled — pin will appear when enabled"),
         ]),
-        React.createElement(RN.View, {
+        React.createElement(RN.Switch, {
           key: "toggle",
-          pointerEvents: "none",
-          style: {
-            width: 46,
-            height: 28,
-            borderRadius: 14,
-            padding: 3,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: pinned ? "flex-end" : "flex-start",
-            backgroundColor: pinned ? C.brand : "#4e5058",
+          value: pinned,
+          onValueChange: value => {
+            const next = value
+              ? [...new Set([...pins, id])]
+              : pins.filter(pinId => pinId !== id);
+            setLocalPins(next);
+            setPins(next);
           },
-        }, React.createElement(RN.View, {
-          style: {
-            width: 22,
-            height: 22,
-            borderRadius: 11,
-            backgroundColor: "#ffffff",
-          },
-        })),
+        }),
       ]));
     }
 
