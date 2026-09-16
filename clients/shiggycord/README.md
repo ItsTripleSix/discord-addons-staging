@@ -1,3 +1,5 @@
-# ShiggyCord
+# ShiggyCord staging compatibility mirror
 
-Client-specific copies of the retained working paths. See the repository migration notes for source locations, compatibility, and update commands.
+Stable builds now live in `ItsTripleSix/discord-addons` under `clients/shiggycord/plugins/`.
+
+These plugin copies are retained only so existing staging/refetch URLs continue to resolve.

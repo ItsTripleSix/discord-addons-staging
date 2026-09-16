@@ -1,60 +1,36 @@
 # discord-addons-staging
 
-Public staging, testing, release candidates, and refetch builds for Discord add-ons across supported mobile and desktop clients.
+Public staging/refetch compatibility repository.
 
-## Repository roles
+The tested ShiggyCord collection has been promoted to the stable [`discord-addons`](https://github.com/ItsTripleSix/discord-addons) repository and released there.
 
-| Repository | Visibility | Purpose |
-| --- | --- | --- |
-| [discord-addons](https://github.com/ItsTripleSix/discord-addons) | Public | Stable releases for supported Discord clients |
-| [discord-addons-staging](https://github.com/ItsTripleSix/discord-addons-staging) | Public | Testing, release candidates, and publicly fetchable builds |
-| discord-addons-workbench | Private | Development source, experiments, tests, and migration work |
-| [ShiggyCord](https://github.com/ItsTripleSix/ShiggyCord) | Public | The ShiggyCord client fork |
+## Stable release
 
-## Layout and current installs
+Use the stable repository for new ShiggyCord installs:
 
-Client-specific copies live under clients/. Existing plugin and theme paths remain available for installed clients. [Migration and compatibility notes](docs/repository-migration.md) explain the paths, maintenance command, and known pre-existing packaging issues.
+`https://github.com/ItsTripleSix/discord-addons/tree/main/clients/shiggycord/plugins`
 
-These repositories can hold add-ons for supported mobile or desktop Discord clients; check each add-on's actual client requirements. No ShiggyCord build is promoted to stable by this reorganization.
+Release page:
 
-## Current ShiggyCord testing collection
+`https://github.com/ItsTripleSix/discord-addons/releases/tag/shiggycord-plugins-2026.09.16`
 
-The retained plugins/ collection is used for ShiggyCord testing. Copies are available under clients/shiggycord/plugins/. Individual plugins may still depend on the Vendetta-compatible API; placement in staging does not claim complete device validation.
+## Compatibility paths retained
 
-| Plugin | Retained path |
-| --- | --- |
-| Account Switcher | plugins/account-switcher/ |
-| Composer Cleaner | plugins/composer-cleaner/ |
-| Hidden Channels | plugins/hidden-channels/ |
-| Purge Tools | plugins/purge-tools/ |
-| Quick Mock | plugins/quick-mock/ |
-| Settings Pins | plugins/settings-pins/ |
-| Silent Typing | plugins/silent-typing/ |
+The existing `plugins/` and `clients/shiggycord/plugins/` copies are intentionally retained so already-installed staging/refetch URLs continue to work. They currently mirror the released builds.
 
-### Settings Pins features
+The old test bundle, smoke-test scripts/workflows, migration scaffolding, unused client placeholders, and other retired staging artifacts were removed after promotion.
 
-- Pin installed plugin settings directly into the ShiggyCord settings section.
-- Hide non-core plugin shortcuts that are already registered there, including bundled or hard-baked plugin entries.
-- Keep pin and visibility choices saved per plugin/shortcut.
-- Use ReShiggy after changing pins or existing-shortcut visibility for the main Settings list to rebuild.
+## Current retained plugins
 
-Purge Tools' established refetch entry remains:
+- Account Switcher
+- Composer Cleaner
+- Hidden Channels
+- Purge Tools
+- Quick Mock
+- Settings Pins
+- Silent Typing
 
-~~~text
-https://raw.githubusercontent.com/ItsTripleSix/discord-addons-staging/main/plugins/purge-tools/
-~~~
-
-The client-specific copy is:
-
-~~~text
-https://raw.githubusercontent.com/ItsTripleSix/discord-addons-staging/main/clients/shiggycord/plugins/purge-tools/
-~~~
-
-Keep an existing installed entry while its saved settings and checkpoints are in use. The source URL change does not require installing a duplicate plugin.
-
-## Client test bundle
-
-shiggy-test/shiggycord.js and its build workflow are retained. They are client-test artifacts, separate from the add-on collection.
+Theme Toolkit remains separate and is not part of the ShiggyCord release.
 
 ## License
 
