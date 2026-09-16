@@ -1,0 +1,42 @@
+name: Sync Settings Pins v1.0.4
+
+on:
+  push:
+    paths:
+      - .github/workflows/sync-settings-pins-v104.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate and sync
+        run: |
+          node --check plugins/settings-pins/index.js
+          grep -q 'const VERSION = "1.0.4-shiggy";' plugins/settings-pins/index.js
+          cp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          HASH="$(git hash-object plugins/settings-pins/index.js)"
+          export HASH
+          python3 - <<'PY'
+          import json, os
+          p='plugins/settings-pins/manifest.json'
+          data=json.load(open(p,encoding='utf-8'))
+          data['description']="Pin any installed plugin's settings directly into ShiggyCord with per-plugin persisted toggle state."
+          data['hash']=os.environ['HASH']
+          open(p,'w',encoding='utf-8').write(json.dumps(data,indent=2)+"\n")
+          PY
+          cp plugins/settings-pins/manifest.json clients/shiggycord/plugins/settings-pins/manifest.json
+          cmp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          cmp plugins/settings-pins/manifest.json clients/shiggycord/plugins/settings-pins/manifest.json
+          test "$(python3 -c 'import json; print(json.load(open("plugins/settings-pins/manifest.json"))["hash"])')" = "$HASH"
+      - name: Commit
+        run: |
+          git config user.name "ItsTripleSix"
+          git config user.email "onlytriplesix@protonmail.com"
+          git add plugins/settings-pins clients/shiggycord/plugins/settings-pins
+          git diff --cached --check
+          git commit -m "Settings Pins v1.0.4 state fix"
+          git push origin HEAD:main
