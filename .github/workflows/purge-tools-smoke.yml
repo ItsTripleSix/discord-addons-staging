@@ -1,5 +1,6 @@
 name: Purge Tools smoke test
 
+# Validates either the historical wrapper build chain or the flattened release.
 on:
   push:
     paths:
@@ -36,8 +37,8 @@ jobs:
           cmp plugins/purge-tools/index.js clients/shiggycord/plugins/purge-tools/index.js
           cmp plugins/purge-tools/manifest.json clients/shiggycord/plugins/purge-tools/manifest.json
 
-      - name: Check outer wrapper syntax
+      - name: Check current plugin syntax
         run: node --check plugins/purge-tools/index.js
 
-      - name: Generate, repair, flatten, and parse complete chain
+      - name: Validate current plugin or complete historical build chain
         run: node scripts/purge-tools-smoke.cjs plugins/purge-tools/index.js /tmp/purge-tools-base122.js /tmp/purge-tools-base121.js /tmp/purge-tools-base120.js /tmp/purge-tools-base117.js /tmp/purge-tools-stable-core.js
