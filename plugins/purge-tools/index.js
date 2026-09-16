@@ -5,7 +5,7 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const BASE_URL = "https://raw.githubusercontent.com/ItsTripleSix/discord-addons-staging/10bcce8814bde3565fa3f6074b860c0f926df6cc/plugins/purge-tools/index.js";
-  const CACHE = "shiggyPurgeWrapperBase122";
+  const CACHE = "shiggyPurgeWrapperBase122v124";
   let inner = null, innerError = null, loadPromise = null, started = false;
   const listeners = new Set();
   const toast = text => { try { V.ui?.toasts?.showToast?.(String(text)); } catch {} };
@@ -16,7 +16,7 @@
       const r = await V.utils.safeFetch(BASE_URL, { cache: "no-store" });
       if (!r?.ok) throw new Error(`HTTP ${r?.status ?? "?"}`);
       const s = await r.text();
-      if (!s?.includes("1.2.2-shiggy")) throw new Error("Invalid Purge Tools v1.2.2 base source");
+      if (!s?.includes("version target") || !s?.includes("clear pacing report")) throw new Error("Invalid Purge Tools v1.2.2 base source");
       storage[CACHE] = s;
       return s;
     } catch (e) {
@@ -32,14 +32,31 @@
     return s.slice(0, i) + b + s.slice(i + a.length);
   }
 
+  function callBoundsByLabel(source, label, callPrefix) {
+    const needle = `"${label}"`;
+    const labelPos = source.indexOf(needle);
+    if (labelPos < 0 || source.indexOf(needle, labelPos + needle.length) >= 0) throw new Error(`Could not locate ${label}`);
+    const start = source.lastIndexOf(callPrefix, labelPos);
+    if (start < 0) throw new Error(`Could not locate call for ${label}`);
+    const end = source.indexOf(");", labelPos);
+    if (end < 0) throw new Error(`Could not locate call end for ${label}`);
+    return { start, end: end + 2 };
+  }
+
+  function replaceInsideCall(source, label, before, after, callPrefix = "out = once(out,") {
+    const { start, end } = callBoundsByLabel(source, label, callPrefix);
+    const part = source.slice(start, end);
+    const i = part.indexOf(before);
+    if (i < 0 || part.indexOf(before, i + before.length) >= 0) throw new Error(`Could not patch ${label}`);
+    const next = part.slice(0, i) + after + part.slice(i + before.length);
+    return source.slice(0, start) + next + source.slice(end);
+  }
+
   function switchRexForLabel(source, label) {
-    const labelPos = source.indexOf(`"${label}"`);
-    if (labelPos < 0 || source.indexOf(`"${label}"`, labelPos + label.length + 2) >= 0) {
-      throw new Error(`Could not locate ${label}`);
-    }
-    const callPos = source.lastIndexOf("out = rex(out,", labelPos);
-    if (callPos < 0) throw new Error(`Could not locate rex call for ${label}`);
-    return source.slice(0, callPos) + "out = srex(out," + source.slice(callPos + "out = rex(out,".length);
+    const { start, end } = callBoundsByLabel(source, label, "out = rex(out,");
+    const part = source.slice(start, end);
+    if (!part.startsWith("out = rex(out,")) throw new Error(`Could not patch ${label}`);
+    return source.slice(0, start) + "out = srex(out," + part.slice("out = rex(out,".length) + source.slice(end);
   }
 
   function patch(source) {
@@ -48,32 +65,21 @@
     out = once(
       out,
       '  const rex = (s, a, b, label) => once(s, esc(a), esc(b), label);\n',
-      '  const rex = (s, a, b, label) => once(s, esc(a), esc(b), label);\n  const sq = s => String(s).replace(/\\\\/g, "\\\\\\\\").replace(/\\n/g, "\\\\n").replace(/\\r/g, "\\\\r").replace(/\\\'/g, "\\\\\\\'");\n  const srex = (s, a, b, label) => once(s, sq(a), sq(b), label);\n',
+      '  const rex = (s, a, b, label) => once(s, esc(a), esc(b), label);\n  const sq = s => String(s).replace(/\\\\/g, "\\\\\\\\").replace(/\\n/g, "\\\\n").replace(/\\r/g, "\\\\r").replace(/\'/g, "\\\\\'");\n  const srex = (s, a, b, label) => once(s, sq(a), sq(b), label);\n',
       "single-quoted wrapper patch helper",
     );
 
     out = switchRexForLabel(out, "clear pacing report");
     out = switchRexForLabel(out, "report wording");
-
-    out = once(
-      out,
-      '    out = once(out, "1.2.0-shiggy", "1.2.2-shiggy", "version");',
-      '    out = once(out, "1.2.0-shiggy", "1.2.3-shiggy", "version");',
-      "v1.2.3 version",
-    );
-    out = once(
-      out,
-      '    out = once(out, "purge-tools-shiggy-v1.2.0-base.js", "purge-tools-shiggy-v1.2.2-base.js", "source label");',
-      '    out = once(out, "purge-tools-shiggy-v1.2.0-base.js", "purge-tools-shiggy-v1.2.3-base.js", "source label");',
-      "v1.2.3 source label",
-    );
+    out = replaceInsideCall(out, "version target", "1.2.2-shiggy", "1.2.4-shiggy");
+    out = replaceInsideCall(out, "source label target", "purge-tools-shiggy-v1.2.2-base.js", "purge-tools-shiggy-v1.2.4-base.js");
 
     return out;
   }
 
   async function load() {
     const source = patch(await fetchBase());
-    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.2.3-wrapper.js`);
+    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.2.4-wrapper.js`);
     const raw = factory(V), resolved = typeof raw === "function" ? raw() : raw;
     return await Promise.resolve(resolved?.default ?? resolved ?? {});
   }
