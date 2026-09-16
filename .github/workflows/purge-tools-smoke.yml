@@ -21,8 +21,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Materialize pinned v1.2.2 base
-        run: git show 10bcce8814bde3565fa3f6074b860c0f926df6cc:plugins/purge-tools/index.js > /tmp/purge-tools-base122.js
+      - name: Materialize pinned wrapper bases
+        run: |
+          git show 10bcce8814bde3565fa3f6074b860c0f926df6cc:plugins/purge-tools/index.js > /tmp/purge-tools-base122.js
+          git show d5eb9a6f5982b68146c8c1f6d53d0de7a3df2cf3:plugins/purge-tools/index.js > /tmp/purge-tools-base121.js
+          git show f193a94e67e9fc3b0a8c8b0a67bb87cc5e3689af:plugins/purge-tools/index.js > /tmp/purge-tools-base120.js
+          git show 9528af7b82f442173805b5db3fc9a061c1a3b857:plugins/purge-tools/index.js > /tmp/purge-tools-base117.js
 
       - name: Verify mirrored plugin files
         run: |
@@ -32,5 +36,5 @@ jobs:
       - name: Check outer wrapper syntax
         run: node --check plugins/purge-tools/index.js
 
-      - name: Generate and parse inner source
-        run: node scripts/purge-tools-smoke.cjs plugins/purge-tools/index.js /tmp/purge-tools-base122.js
+      - name: Generate and parse complete wrapper chain
+        run: node scripts/purge-tools-smoke.cjs plugins/purge-tools/index.js /tmp/purge-tools-base122.js /tmp/purge-tools-base121.js /tmp/purge-tools-base120.js /tmp/purge-tools-base117.js
