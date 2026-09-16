@@ -1,0 +1,18 @@
+name: Settings Pins v1.0.5 smoke
+on:
+  push:
+    paths:
+      - .github/workflows/settings-pins-v105-smoke.yml
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          node --check plugins/settings-pins/index.js
+          cmp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          grep -q 'const VERSION = "1.0.5-shiggy";' plugins/settings-pins/index.js
+          HASH="$(git hash-object plugins/settings-pins/index.js)"
+          test "$HASH" = "d6daaf481df12b3861238f946f34a7420bcf15ac"
+          test "$(python3 -c 'import json; print(json.load(open("plugins/settings-pins/manifest.json"))["hash"])')" = "$HASH"
+          cmp plugins/settings-pins/manifest.json clients/shiggycord/plugins/settings-pins/manifest.json
