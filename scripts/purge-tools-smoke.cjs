@@ -14,14 +14,17 @@ const context = {
 };
 
 function expose(source, fnName, label) {
-  const marker = "  return {\n    onLoad() {";
-  const first = source.indexOf(marker);
-  if (first < 0 || source.indexOf(marker, first + marker.length) >= 0) {
+  const re = /(\n\s*return\s*\{\s*\n\s*)(onLoad\s*\(\s*\)\s*\{)/g;
+  const matches = [...source.matchAll(re)];
+  if (matches.length !== 1) {
+    console.error(`${label} instrumentation candidates: ${matches.length}`);
+    console.error(source.slice(Math.max(0, source.length - 1200)));
     throw new Error(`Could not instrument ${label}`);
   }
-  const instrumented = source.slice(0, first)
-    + `  return {\n    __debugPatch: ${fnName},\n    onLoad() {`
-    + source.slice(first + marker.length);
+  const match = matches[0];
+  const i = match.index;
+  const replacement = `${match[1]}__debugPatch: ${fnName},\n    ${match[2]}`;
+  const instrumented = source.slice(0, i) + replacement + source.slice(i + match[0].length);
   const plugin = vm.runInNewContext(instrumented, context, { filename: `${label}-instrumented.js` });
   if (typeof plugin?.__debugPatch !== "function") throw new Error(`${label} patch function was not exposed`);
   return plugin.__debugPatch;
