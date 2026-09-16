@@ -1,13 +1,13 @@
 {
   "name": "Settings Pins",
-  "description": "Pin any installed plugin's settings directly into ShiggyCord using ShiggyCord's own settings registry. No Metro polling or settings-list patching.",
+  "description": "Pin any installed plugin's settings directly into ShiggyCord using ShiggyCord's own settings registry, with reliable row-based toggle controls.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "ebfe485ef7400c76417645ef9c8baacfdb224065",
+  "hash": "a8aa31f6d8b8277407c305e753ba3aebb968edd3",
   "vendetta": {
     "icon": "PuzzlePieceIcon"
   }

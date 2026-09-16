@@ -8,7 +8,7 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const SELF_ID = String(V.plugin?.id ?? "");
-  const VERSION = "1.0.0-shiggy";
+  const VERSION = "1.0.1-shiggy";
   const SECTION = "ShiggyCord";
   const KEY_PREFIX = "ITS666_SETTINGS_PIN_";
 
@@ -177,6 +177,7 @@
 
   function Settings() {
     const [, refresh] = React.useReducer(value => value + 1, 0);
+    const ToggleRow = RN.Pressable ?? RN.TouchableOpacity;
 
     React.useEffect(() => {
       initializeDefaults();
@@ -216,8 +217,17 @@
       let settingsAvailable = false;
       try { settingsAvailable = typeof V.plugins?.getSettings?.(id) === "function"; } catch {}
 
-      children.push(React.createElement(RN.View, {
+      const Row = ToggleRow ?? RN.View;
+      children.push(React.createElement(Row, {
         key: id,
+        ...(ToggleRow ? {
+          onPress: () => {
+            setPinned(id, !pinned);
+            refresh();
+          },
+          accessibilityRole: "switch",
+          accessibilityState: { checked: pinned },
+        } : {}),
         style: {
           backgroundColor: C.card,
           paddingHorizontal: 14,
@@ -252,6 +262,7 @@
         React.createElement(RN.Switch, {
           key: "toggle",
           value: pinned,
+          ...(ToggleRow ? { pointerEvents: "none" } : {}),
           onValueChange: value => {
             setPinned(id, value);
             refresh();
