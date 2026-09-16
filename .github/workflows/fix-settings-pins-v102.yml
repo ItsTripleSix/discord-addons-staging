@@ -1,0 +1,106 @@
+name: Fix Settings Pins v1.0.2
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-settings-pins-v102.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging
+        uses: actions/checkout@v4
+
+      - name: Verify v1.0.1 baseline
+        run: |
+          test "$(git hash-object plugins/settings-pins/index.js)" = "a8aa31f6d8b8277407c305e753ba3aebb968edd3"
+          cmp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          grep -q 'const VERSION = "1.0.1-shiggy";' plugins/settings-pins/index.js
+
+      - name: Replace native controlled switch with passive visual toggle
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path("plugins/settings-pins/index.js"),
+              Path("clients/shiggycord/plugins/settings-pins/index.js"),
+          ]
+
+          before = '''        React.createElement(RN.Switch, {
+          key: "toggle",
+          value: pinned,
+          ...(ToggleRow ? { pointerEvents: "none" } : {}),
+          onValueChange: value => {
+            setPinned(id, value);
+            refresh();
+          },
+        }),'''
+
+          after = '''        React.createElement(RN.View, {
+          key: "toggle",
+          pointerEvents: "none",
+          style: {
+            width: 46,
+            height: 28,
+            borderRadius: 14,
+            padding: 3,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: pinned ? "flex-end" : "flex-start",
+            backgroundColor: pinned ? C.brand : "#4e5058",
+          },
+        }, React.createElement(RN.View, {
+          style: {
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            backgroundColor: "#ffffff",
+          },
+        })),'''
+
+          for path in paths:
+              s = path.read_text(encoding="utf-8")
+              if s.count('const VERSION = "1.0.1-shiggy";') != 1:
+                  raise SystemExit(f"{path}: unexpected version marker")
+              if s.count(before) != 1:
+                  raise SystemExit(f"{path}: expected one native toggle block, found {s.count(before)}")
+              s = s.replace('const VERSION = "1.0.1-shiggy";', 'const VERSION = "1.0.2-shiggy";', 1)
+              s = s.replace(before, after, 1)
+              path.write_text(s, encoding="utf-8")
+          PY
+
+      - name: Validate and update manifests
+        run: |
+          cmp plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/index.js
+          node --check plugins/settings-pins/index.js
+          grep -q 'const VERSION = "1.0.2-shiggy";' plugins/settings-pins/index.js
+          ! grep -q 'React.createElement(RN.Switch' plugins/settings-pins/index.js
+          HASH="$(git hash-object plugins/settings-pins/index.js)"
+          export HASH
+          python3 - <<'PY'
+          import json, os
+          for path in ["plugins/settings-pins/manifest.json", "clients/shiggycord/plugins/settings-pins/manifest.json"]:
+              with open(path, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              data["description"] = "Pin any installed plugin's settings directly into ShiggyCord using ShiggyCord's own settings registry, with row-driven controls that avoid Android native switch event conflicts."
+              data["hash"] = os.environ["HASH"]
+              with open(path, "w", encoding="utf-8") as f:
+                  json.dump(data, f, indent=2, ensure_ascii=False)
+                  f.write("\n")
+          PY
+          cmp plugins/settings-pins/manifest.json clients/shiggycord/plugins/settings-pins/manifest.json
+          test "$(python3 -c 'import json; print(json.load(open("plugins/settings-pins/manifest.json"))["hash"])')" = "$HASH"
+
+      - name: Commit fix
+        run: |
+          git config user.name "ItsTripleSix"
+          git config user.email "onlytriplesix@protonmail.com"
+          git add plugins/settings-pins/index.js plugins/settings-pins/manifest.json clients/shiggycord/plugins/settings-pins/index.js clients/shiggycord/plugins/settings-pins/manifest.json
+          git diff --cached --check
+          git commit -m "Fix Settings Pins Android toggle interaction"
+          git push origin HEAD:main
