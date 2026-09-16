@@ -1,0 +1,102 @@
+name: Clean staging after stable release
+
+on:
+  push:
+    paths:
+      - .github/workflows/clean-staging-after-release.yml
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove retired test-bench artifacts
+        run: |
+          set -euo pipefail
+          rm -rf \
+            .github/workflows/build-shiggy-noawait-test.yml \
+            .github/workflows/purge-tools-smoke.yml \
+            scripts \
+            shiggy-test \
+            docs \
+            shared \
+            clients/revenge-classic \
+            clients/shiggycord/themes
+
+          cat > README.md <<'EOF'
+          # discord-addons-staging
+
+          Public staging/refetch compatibility repository.
+
+          The tested ShiggyCord collection has been promoted to the stable [`discord-addons`](https://github.com/ItsTripleSix/discord-addons) repository and released there.
+
+          ## Stable release
+
+          Use the stable repository for new ShiggyCord installs:
+
+          `https://github.com/ItsTripleSix/discord-addons/tree/main/clients/shiggycord/plugins`
+
+          Release page:
+
+          `https://github.com/ItsTripleSix/discord-addons/releases/tag/shiggycord-plugins-2026.09.16`
+
+          ## Compatibility paths retained
+
+          The existing `plugins/` and `clients/shiggycord/plugins/` copies are intentionally retained so already-installed staging/refetch URLs continue to work. They currently mirror the released builds.
+
+          The old test bundle, smoke-test scripts/workflows, migration scaffolding, unused client placeholders, and other retired staging artifacts were removed after promotion.
+
+          ## Current retained plugins
+
+          - Account Switcher
+          - Composer Cleaner
+          - Hidden Channels
+          - Purge Tools
+          - Quick Mock
+          - Settings Pins
+          - Silent Typing
+
+          Theme Toolkit remains separate and is not part of the ShiggyCord release.
+
+          ## License
+
+          MIT
+          EOF
+
+          cat > clients/shiggycord/README.md <<'EOF'
+          # ShiggyCord staging compatibility mirror
+
+          Stable builds now live in `ItsTripleSix/discord-addons` under `clients/shiggycord/plugins/`.
+
+          These plugin copies are retained only so existing staging/refetch URLs continue to resolve.
+          EOF
+
+          # Ensure compatibility plugin copies are still intact and valid.
+          plugins=(account-switcher composer-cleaner hidden-channels purge-tools quick-mock settings-pins silent-typing)
+          for plugin in "${plugins[@]}"; do
+            test -f "plugins/$plugin/index.js"
+            test -f "plugins/$plugin/manifest.json"
+            test -f "clients/shiggycord/plugins/$plugin/index.js"
+            test -f "clients/shiggycord/plugins/$plugin/manifest.json"
+            cmp "plugins/$plugin/index.js" "clients/shiggycord/plugins/$plugin/index.js"
+            cmp "plugins/$plugin/manifest.json" "clients/shiggycord/plugins/$plugin/manifest.json"
+            node --check "plugins/$plugin/index.js"
+            HASH="$(git hash-object "plugins/$plugin/index.js")"
+            MANIFEST_HASH="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hash"])' "plugins/$plugin/manifest.json")"
+            test "$HASH" = "$MANIFEST_HASH"
+          done
+          grep -q 'PLUGIN_VERSION = "1.2.9-shiggy"' plugins/purge-tools/index.js
+          grep -q 'Account risk — read before using' plugins/purge-tools/index.js
+          grep -q 'VERSION = "1.0.8-shiggy"' plugins/settings-pins/index.js
+          git diff --check
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "ItsTripleSix"
+          git config user.email "onlytriplesix@protonmail.com"
+          git add -A
+          git commit -m "Clean staging after ShiggyCord stable release"
+          git push
