@@ -66,6 +66,12 @@ function reportUnicode(source, label) {
   }
 }
 
+function reportAround(source, needle, label, radius = 1800) {
+  const i = source.indexOf(needle);
+  console.log(`\n${label}: ${needle} at ${i}`);
+  if (i >= 0) console.log(source.slice(Math.max(0, i - radius), Math.min(source.length, i + radius)));
+}
+
 const outer = read(wrapperPath);
 parse(outer, "stage0-current-wrapper");
 
@@ -86,6 +92,8 @@ const stage3 = patch121(read(base120Path));
 fs.writeFileSync("/tmp/purge-tools-stage3.js", stage3);
 parse(stage3, "stage3-v120-wrapper-after-v121");
 reportUnicode(stage3, "stage3");
+reportAround(stage3, "const draftPatch", "stage3 draftPatch");
+reportAround(stage3, "friendly progress card", "stage3 friendly progress patch");
 
 const patch120 = expose(stage3, "patchBaseSource", "stage3-v120-wrapper-after-v121");
 const stage4 = patch120(read(base117Path));
