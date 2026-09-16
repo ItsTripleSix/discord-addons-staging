@@ -8,7 +8,7 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const SELF_ID = String(V.plugin?.id ?? "");
-  const VERSION = "1.0.6-shiggy";
+  const VERSION = "1.0.7-shiggy";
   const SECTION = "ShiggyCord";
   const KEY_PREFIX = "ITS666_SETTINGS_PIN_";
   const STATE_VERSION = 1;
@@ -200,7 +200,7 @@
       }, "Settings Pins"),
       React.createElement(RN.Text, {
         style: { color: C.muted, fontSize: 13, lineHeight: 18, marginBottom: 14 },
-      }, "Choose which plugin settings appear directly in ShiggyCord. Changes save immediately. ReShiggy is currently required to rebuild the main Settings list."),
+      }, "Choose which plugin settings appear directly in ShiggyCord. After turning a pin on or off, use ReShiggy for the change to take effect."),
       ...plugins.map(plugin => {
         const id = String(plugin.id);
         const pinned = isPinned(id);
