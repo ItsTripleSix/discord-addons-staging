@@ -5,7 +5,7 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const BASE_URL = "https://raw.githubusercontent.com/ItsTripleSix/discord-addons-staging/10bcce8814bde3565fa3f6074b860c0f926df6cc/plugins/purge-tools/index.js";
-  const CACHE = "shiggyPurgeWrapperBase122v124";
+  const CACHE = "shiggyPurgeWrapperBase122v125";
   let inner = null, innerError = null, loadPromise = null, started = false;
   const listeners = new Set();
   const toast = text => { try { V.ui?.toasts?.showToast?.(String(text)); } catch {} };
@@ -59,6 +59,29 @@
     return source.slice(0, start) + "out = srex(out," + part.slice("out = rex(out,".length) + source.slice(end);
   }
 
+  function literalizeUnicodeEscapes(source) {
+    let out = String(source);
+    const b = String.fromCharCode(92);
+    const replacements = [
+      [["ud83d", "udfe2"], "🟢"],
+      [["ud83d", "udd34"], "🔴"],
+      [["ud83d", "udfe1"], "🟡"],
+      [["u2705"], "✅"],
+      [["u23f8", "ufe0f"], "⏸️"],
+      [["u26a0", "ufe0f"], "⚠️"],
+      [["u2014"], "—"],
+      [["u00b7"], "·"],
+      [["u25b4"], "▴"],
+      [["u25be"], "▾"],
+    ];
+    for (const [parts, value] of replacements) {
+      const one = parts.map(part => b + part).join("");
+      const two = parts.map(part => b + b + part).join("");
+      out = out.split(two).join(value).split(one).join(value);
+    }
+    return out;
+  }
+
   function patch(source) {
     let out = String(source);
 
@@ -71,15 +94,16 @@
 
     out = switchRexForLabel(out, "clear pacing report");
     out = switchRexForLabel(out, "report wording");
-    out = replaceInsideCall(out, "version target", "1.2.2-shiggy", "1.2.4-shiggy");
-    out = replaceInsideCall(out, "source label target", "purge-tools-shiggy-v1.2.2-base.js", "purge-tools-shiggy-v1.2.4-base.js");
+    out = replaceInsideCall(out, "version target", "1.2.2-shiggy", "1.2.5-shiggy");
+    out = replaceInsideCall(out, "source label target", "purge-tools-shiggy-v1.2.2-base.js", "purge-tools-shiggy-v1.2.5-base.js");
+    out = literalizeUnicodeEscapes(out);
 
     return out;
   }
 
   async function load() {
     const source = patch(await fetchBase());
-    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.2.4-wrapper.js`);
+    const factory = (0, eval)(`vendetta=>{return ${source}}\n//# sourceURL=purge-tools-shiggy-v1.2.5-wrapper.js`);
     const raw = factory(V), resolved = typeof raw === "function" ? raw() : raw;
     return await Promise.resolve(resolved?.default ?? resolved ?? {});
   }
