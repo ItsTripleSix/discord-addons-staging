@@ -8,7 +8,7 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const SELF_ID = String(V.plugin?.id ?? "");
-  const VERSION = "1.0.1-shiggy";
+  const VERSION = "1.0.2-shiggy";
   const SECTION = "ShiggyCord";
   const KEY_PREFIX = "ITS666_SETTINGS_PIN_";
 
@@ -259,15 +259,27 @@
                 ? "No settings page detected"
                 : "Disabled — pin will appear when enabled"),
         ]),
-        React.createElement(RN.Switch, {
+        React.createElement(RN.View, {
           key: "toggle",
-          value: pinned,
-          ...(ToggleRow ? { pointerEvents: "none" } : {}),
-          onValueChange: value => {
-            setPinned(id, value);
-            refresh();
+          pointerEvents: "none",
+          style: {
+            width: 46,
+            height: 28,
+            borderRadius: 14,
+            padding: 3,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: pinned ? "flex-end" : "flex-start",
+            backgroundColor: pinned ? C.brand : "#4e5058",
           },
-        }),
+        }, React.createElement(RN.View, {
+          style: {
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            backgroundColor: "#ffffff",
+          },
+        })),
       ]));
     }
 

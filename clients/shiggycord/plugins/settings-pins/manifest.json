@@ -1,13 +1,13 @@
 {
   "name": "Settings Pins",
-  "description": "Pin any installed plugin's settings directly into ShiggyCord using ShiggyCord's own settings registry, with reliable row-based toggle controls.",
+  "description": "Pin any installed plugin's settings directly into ShiggyCord using ShiggyCord's own settings registry, with row-driven controls that avoid Android native switch event conflicts.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "a8aa31f6d8b8277407c305e753ba3aebb968edd3",
+  "hash": "0bf141f7e9987e94f52012441019529646fa96eb",
   "vendetta": {
     "icon": "PuzzlePieceIcon"
   }
