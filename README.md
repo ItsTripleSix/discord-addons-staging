@@ -31,6 +31,13 @@ The retained plugins/ collection is used for ShiggyCord testing. Copies are avai
 | Settings Pins | plugins/settings-pins/ |
 | Silent Typing | plugins/silent-typing/ |
 
+### Settings Pins features
+
+- Pin installed plugin settings directly into the ShiggyCord settings section.
+- Hide non-core plugin shortcuts that are already registered there, including bundled or hard-baked plugin entries.
+- Keep pin and visibility choices saved per plugin/shortcut.
+- Use ReShiggy after changing pins or existing-shortcut visibility for the main Settings list to rebuild.
+
 Purge Tools' established refetch entry remains:
 
 ~~~text

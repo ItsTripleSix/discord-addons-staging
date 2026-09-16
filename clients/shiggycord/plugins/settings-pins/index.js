@@ -8,10 +8,18 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const SELF_ID = String(V.plugin?.id ?? "");
-  const VERSION = "1.0.7-shiggy";
+  const VERSION = "1.0.8-shiggy";
   const SECTION = "ShiggyCord";
   const KEY_PREFIX = "ITS666_SETTINGS_PIN_";
   const STATE_VERSION = 1;
+  const CORE_ROW_KEYS = new Set([
+    "SHIGGYCORD",
+    "BUNNY_PLUGINS",
+    "BUNNY_THEMES",
+    "BUNNY_FONTS",
+    "BUNNY_DEVELOPER",
+  ]);
+  const originalExistingPredicates = new Map();
 
   const rootNavigation = B?.metro?.findByPropsLazy?.("getRootNavigationRef") ?? null;
 
@@ -80,6 +88,18 @@
     storage[pinStorageKey(id)] = !!value;
   }
 
+  function existingStorageKey(key) {
+    return `existing_${hashId(String(key))}`;
+  }
+
+  function isExistingVisible(key) {
+    return storage[existingStorageKey(key)] !== false;
+  }
+
+  function setExistingVisible(key, value) {
+    storage[existingStorageKey(key)] = !!value;
+  }
+
   function currentPins() {
     return Object.values(allPlugins())
       .filter(plugin => plugin?.id && isPinned(String(plugin.id)))
@@ -100,6 +120,41 @@
     for (let i = rows.length - 1; i >= 0; i--) {
       if (String(rows[i]?.key ?? "").startsWith(KEY_PREFIX)) rows.splice(i, 1);
     }
+  }
+
+  function isExistingShortcutRow(row) {
+    const key = String(row?.key ?? "");
+    return !!key && !CORE_ROW_KEYS.has(key) && !key.startsWith(KEY_PREFIX);
+  }
+
+  function existingShortcutRows() {
+    return (shiggyRows() ?? []).filter(isExistingShortcutRow);
+  }
+
+  function wrapExistingShortcuts(rows = shiggyRows()) {
+    if (!Array.isArray(rows)) return;
+    for (const row of rows) {
+      if (!isExistingShortcutRow(row) || originalExistingPredicates.has(row)) continue;
+      const key = String(row.key);
+      const original = typeof row.usePredicate === "function" ? row.usePredicate : null;
+      originalExistingPredicates.set(row, original);
+      row.usePredicate = () => {
+        if (!isExistingVisible(key)) return false;
+        if (!original) return true;
+        try { return !!original(); }
+        catch { return false; }
+      };
+    }
+  }
+
+  function restoreExistingShortcuts() {
+    for (const [row, original] of originalExistingPredicates) {
+      try {
+        if (original) row.usePredicate = original;
+        else delete row.usePredicate;
+      } catch {}
+    }
+    originalExistingPredicates.clear();
   }
 
   function iconFor(plugin) {
@@ -171,6 +226,7 @@
     if (!rows) return false;
 
     removeOurRows(rows);
+    wrapExistingShortcuts(rows);
     const pinRows = currentPins().map(makePinRow).filter(Boolean);
     if (!pinRows.length) return true;
 
@@ -182,6 +238,7 @@
 
   function Settings() {
     ensurePinState();
+    wrapExistingShortcuts();
     const [, forceUpdate] = React.useReducer(value => value + 1, 0);
 
     React.useEffect(() => () => {
@@ -191,6 +248,8 @@
     const plugins = Object.values(allPlugins())
       .filter(plugin => plugin?.id && plugin?.manifest?.name)
       .sort((a, b) => String(a.manifest.name).localeCompare(String(b.manifest.name)));
+
+    const existing = existingShortcutRows();
 
     return React.createElement(
       RN.ScrollView,
@@ -241,6 +300,47 @@
           },
         }));
       }),
+      ...(existing.length ? [
+        React.createElement(RN.Text, {
+          key: "existing-shortcuts-title",
+          style: { color: C.text, fontSize: 17, fontWeight: "700", marginTop: 22, marginBottom: 4 },
+        }, "Already in ShiggyCord"),
+        React.createElement(RN.Text, {
+          key: "existing-shortcuts-note",
+          style: { color: C.muted, fontSize: 12, lineHeight: 17, marginBottom: 8 },
+        }, "These plugin shortcuts were already added to ShiggyCord. Turn one off to hide it, then use ReShiggy for the change to take effect."),
+        ...existing.map(row => {
+          const key = String(row.key);
+          let title = key;
+          try { title = String(row.title?.() ?? key); } catch {}
+          return React.createElement(RN.View, {
+            key: `existing-${key}`,
+            style: {
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 14,
+              borderBottomWidth: 1,
+              borderBottomColor: C.border,
+            },
+          },
+          React.createElement(RN.View, { style: { flex: 1, paddingRight: 16 } },
+            React.createElement(RN.Text, {
+              style: { color: C.text, fontSize: 16, fontWeight: "600", marginBottom: 3 },
+            }, title),
+            React.createElement(RN.Text, {
+              style: { color: C.muted, fontSize: 12, lineHeight: 17 },
+            }, "Existing ShiggyCord shortcut"),
+          ),
+          React.createElement(RN.Switch, {
+            value: isExistingVisible(key),
+            onValueChange(value) {
+              setExistingVisible(key, value);
+              forceUpdate();
+            },
+          }));
+        }),
+      ] : []),
       React.createElement(RN.Text, {
         style: { color: C.muted, fontSize: 12, marginTop: 14 },
       }, `v${VERSION}`),
@@ -253,6 +353,7 @@
       syncPins();
     },
     onUnload() {
+      restoreExistingShortcuts();
       removeOurRows(shiggyRows());
     },
     settings: Settings,
