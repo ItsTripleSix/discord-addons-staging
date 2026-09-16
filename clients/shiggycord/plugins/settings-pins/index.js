@@ -8,12 +8,11 @@
   const { React, ReactNative: RN } = V.metro.common;
   const storage = V.plugin?.storage ?? {};
   const SELF_ID = String(V.plugin?.id ?? "");
-  const VERSION = "1.0.3-shiggy";
+  const VERSION = "1.0.4-shiggy";
   const SECTION = "ShiggyCord";
   const KEY_PREFIX = "ITS666_SETTINGS_PIN_";
+  const STATE_VERSION = 1;
 
-  // Shiggy's own lazy Metro finder. Merely creating this proxy does not scan or
-  // load Discord modules; it resolves only if a pinned row is actually pressed.
   const rootNavigation = B?.metro?.findByPropsLazy?.("getRootNavigationRef") ?? null;
 
   const C = {
@@ -33,39 +32,58 @@
     catch { return {}; }
   }
 
-  function currentPins() {
-    const raw = storage.pinnedIds;
-    if (!Array.isArray(raw)) return [];
-    return [...new Set(raw.map(String).filter(Boolean))];
-  }
-
-  function initializeDefaults() {
-    if (Array.isArray(storage.pinnedIds)) return;
-
-    // Preserve the two shortcuts that existed before this central pin manager.
-    // This runs only on first install; after that the user's choices are kept.
-    const wanted = new Set(["Account Switcher", "Purge Tools"]);
-    const defaults = Object.values(allPlugins())
-      .filter(plugin => wanted.has(String(plugin?.manifest?.name ?? "")))
-      .map(plugin => String(plugin?.id ?? ""))
-      .filter(Boolean);
-
-    storage.pinnedIds = defaults;
-  }
-
-  function setPins(ids) {
-    storage.pinnedIds = [...new Set(ids.map(String).filter(Boolean))];
-  }
-
-  function pinKey(id) {
-    // Small deterministic FNV-1a key. Avoids putting long raw URLs into Discord's
-    // setting IDs while remaining stable across restarts.
+  function hashId(id) {
     let hash = 0x811c9dc5;
     for (let i = 0; i < id.length; i++) {
       hash ^= id.charCodeAt(i);
       hash = Math.imul(hash, 0x01000193);
     }
-    return `${KEY_PREFIX}${(hash >>> 0).toString(36).toUpperCase()}`;
+    return (hash >>> 0).toString(36).toUpperCase();
+  }
+
+  function pinRowKey(id) {
+    return `${KEY_PREFIX}${hashId(id)}`;
+  }
+
+  function pinStorageKey(id) {
+    return `pin_${hashId(id)}`;
+  }
+
+  function ensurePinState() {
+    if (storage.pinStateVersion === STATE_VERSION) return;
+
+    const legacy = Array.isArray(storage.pinnedIds)
+      ? new Set(storage.pinnedIds.map(String))
+      : null;
+    const defaults = new Set(["Account Switcher", "Purge Tools"]);
+
+    for (const plugin of Object.values(allPlugins())) {
+      if (!plugin?.id) continue;
+      const id = String(plugin.id);
+      const key = pinStorageKey(id);
+      if (storage[key] != null) continue;
+
+      const enabled = legacy
+        ? legacy.has(id)
+        : defaults.has(String(plugin?.manifest?.name ?? ""));
+      storage[key] = enabled;
+    }
+
+    storage.pinStateVersion = STATE_VERSION;
+  }
+
+  function isPinned(id) {
+    return storage[pinStorageKey(id)] === true;
+  }
+
+  function setPinned(id, value) {
+    storage[pinStorageKey(id)] = !!value;
+  }
+
+  function currentPins() {
+    return Object.values(allPlugins())
+      .filter(plugin => plugin?.id && isPinned(String(plugin.id)))
+      .map(plugin => String(plugin.id));
   }
 
   function shiggyRows() {
@@ -116,7 +134,6 @@
     try {
       let navigation = rootNavigation?.getRootNavigationRef?.();
       if (!navigation?.navigate) {
-        // Fallback is only allowed on an explicit tap, never during startup.
         navigation = V.metro?.findByProps?.("getRootNavigationRef")?.getRootNavigationRef?.();
       }
       if (!navigation?.navigate) throw new Error("Navigation unavailable");
@@ -135,7 +152,7 @@
     if (!plugin) return null;
 
     return {
-      key: pinKey(id),
+      key: pinRowKey(id),
       title: () => String(allPlugins()[id]?.manifest?.name ?? plugin.manifest?.name ?? "Plugin"),
       icon: iconFor(plugin),
       onPress: () => openPinnedPlugin(id),
@@ -149,13 +166,11 @@
   }
 
   function syncPins() {
+    ensurePinState();
     const rows = shiggyRows();
     if (!rows) return false;
 
-    // Never replace Shiggy's section object and never patch Discord's settings
-    // renderer. Mutate only our own rows in Shiggy's exported section registry.
     removeOurRows(rows);
-
     const pinRows = currentPins().map(makePinRow).filter(Boolean);
     if (!pinRows.length) return true;
 
@@ -166,12 +181,9 @@
   }
 
   function Settings() {
-    initializeDefaults();
-    const [pins, setLocalPins] = React.useState(() => currentPins());
+    ensurePinState();
+    const [, forceUpdate] = React.useReducer(value => value + 1, 0);
 
-    // Do not mutate Shiggy's live settings registry while this page is handling a
-    // toggle. The native switch controls local React state immediately, and the
-    // registry is reconciled only when leaving this page.
     React.useEffect(() => () => {
       syncPins();
     }, []);
@@ -180,105 +192,65 @@
       .filter(plugin => plugin?.id && plugin?.manifest?.name)
       .sort((a, b) => String(a.manifest.name).localeCompare(String(b.manifest.name)));
 
-    const children = [
-      React.createElement(RN.View, {
-        key: "intro",
-        style: { backgroundColor: C.card, padding: 14, borderRadius: 12 },
-      }, [
-        React.createElement(RN.Text, {
-          key: "title",
-          style: { color: C.text, fontSize: 18, fontWeight: "700" },
-        }, "Settings Pins"),
-        React.createElement(RN.Text, {
-          key: "desc",
-          style: { color: C.muted, marginTop: 6, fontSize: 12, lineHeight: 17 },
-        }, "Choose which installed plugins appear directly in ShiggyCord settings. Pins use ShiggyCord's own settings registry—no createList patch, renderer monkey-patch, Metro polling, or plugin-specific shortcut code."),
-        React.createElement(RN.Text, {
-          key: "refresh-note",
-          style: { color: C.muted, marginTop: 6, fontSize: 12, lineHeight: 17 },
-        }, "Changes save immediately. Back out of Settings and reopen it to refresh the main settings list."),
-      ]),
-    ];
+    return React.createElement(
+      RN.ScrollView,
+      { contentContainerStyle: { padding: 16, paddingBottom: 40 } },
+      React.createElement(RN.Text, {
+        style: { color: C.text, fontSize: 20, fontWeight: "700", marginBottom: 8 },
+      }, "Settings Pins"),
+      React.createElement(RN.Text, {
+        style: { color: C.muted, fontSize: 13, lineHeight: 18, marginBottom: 14 },
+      }, "Choose which plugin settings appear directly in ShiggyCord. Changes save immediately; reopen Settings to refresh the main list."),
+      ...plugins.map(plugin => {
+        const id = String(plugin.id);
+        const pinned = isPinned(id);
+        const enabled = plugin.enabled === true;
+        let settingsAvailable = false;
+        try { settingsAvailable = typeof V.plugins?.getSettings?.(id) === "function"; } catch {}
 
-    for (const plugin of plugins) {
-      const id = String(plugin.id);
-      const enabled = plugin.enabled === true;
-      const pinned = pins.includes(id);
-      let settingsAvailable = false;
-      try { settingsAvailable = typeof V.plugins?.getSettings?.(id) === "function"; } catch {}
-
-      children.push(React.createElement(RN.View, {
-        key: id,
-        style: {
-          backgroundColor: C.card,
-          paddingHorizontal: 14,
-          paddingVertical: 11,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: C.border,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 10,
+        return React.createElement(RN.View, {
+          key: id,
+          style: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingVertical: 14,
+            borderBottomWidth: 1,
+            borderBottomColor: C.border,
+          },
         },
-      }, [
-        React.createElement(RN.View, {
-          key: "text",
-          style: { flex: 1 },
-        }, [
+        React.createElement(RN.View, { style: { flex: 1, paddingRight: 16 } },
           React.createElement(RN.Text, {
-            key: "name",
-            style: { color: C.text, fontSize: 15, fontWeight: "700" },
+            style: { color: C.text, fontSize: 16, fontWeight: "600", marginBottom: 3 },
           }, String(plugin.manifest.name)),
           React.createElement(RN.Text, {
-            key: "state",
-            style: { color: C.muted, fontSize: 12, marginTop: 2 },
+            style: { color: C.muted, fontSize: 12, lineHeight: 17 },
           }, id === SELF_ID
             ? "Settings Pins manager"
             : enabled && settingsAvailable
               ? "Settings available"
               : enabled
                 ? "No settings page detected"
-                : "Disabled — pin will appear when enabled"),
-        ]),
+                : "Disabled — pin appears when enabled"),
+        ),
         React.createElement(RN.Switch, {
-          key: "toggle",
           value: pinned,
-          onValueChange: value => {
-            const next = value
-              ? [...new Set([...pins, id])]
-              : pins.filter(pinId => pinId !== id);
-            setLocalPins(next);
-            setPins(next);
+          onValueChange(value) {
+            setPinned(id, value);
+            forceUpdate();
+            toast(`${plugin.manifest.name}: ${value ? "pinned" : "unpinned"}`);
           },
-        }),
-      ]));
-    }
-
-    if (!plugins.length) {
-      children.push(React.createElement(RN.Text, {
-        key: "empty",
-        style: { color: C.muted, fontSize: 13 },
-      }, "No installed plugins were found."));
-    }
-
-    children.push(React.createElement(RN.Text, {
-      key: "version",
-      style: { color: C.muted, fontSize: 12, marginTop: 4 },
-    }, `v${VERSION}`));
-
-    return React.createElement(
-      RN.ScrollView ?? RN.View,
-      {
-        style: { flex: 1, backgroundColor: C.bg },
-        contentContainerStyle: { padding: 16, paddingBottom: 40, gap: 10 },
-      },
-      children,
+        }));
+      }),
+      React.createElement(RN.Text, {
+        style: { color: C.muted, fontSize: 12, marginTop: 14 },
+      }, `v${VERSION}`),
     );
   }
 
   return {
     onLoad() {
-      initializeDefaults();
+      ensurePinState();
       syncPins();
     },
     onUnload() {

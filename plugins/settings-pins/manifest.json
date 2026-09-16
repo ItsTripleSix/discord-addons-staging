@@ -1,13 +1,13 @@
 {
   "name": "Settings Pins",
-  "description": "Pin any installed plugin's settings directly into ShiggyCord using locally controlled toggles that persist choices without mutating the live settings registry mid-tap.",
+  "description": "Pin any installed plugin's settings directly into ShiggyCord with per-plugin persisted toggle state.",
   "authors": [
     {
       "name": "ItsTripleSix"
     }
   ],
   "main": "index.js",
-  "hash": "e2f51a291b357390d448a7076291c7859a39c23f",
+  "hash": "527b9aa026a8b33f5f78f498653badfe315a58b1",
   "vendetta": {
     "icon": "PuzzlePieceIcon"
   }
