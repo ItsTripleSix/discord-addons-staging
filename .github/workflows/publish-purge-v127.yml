@@ -1,5 +1,6 @@
 name: Publish Purge Tools v1.2.7 flat
 
+# One-shot staging publisher. Remove after v1.2.7 is committed.
 on:
   push:
     paths:
