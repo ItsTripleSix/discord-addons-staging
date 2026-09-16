@@ -11,7 +11,9 @@
   const PAGE = 100;
   const SEARCH_PAGE = 25;
   const VERIFY_PASSES = 3;
-  const PLUGIN_VERSION = "1.2.7-shiggy";
+  const TRANSIENT_RETRIES = 2;
+  const TRANSIENT_RETRY_BASE_MS = 1000;
+  const PLUGIN_VERSION = "1.2.8-shiggy";
   const BULK_MAX = 100;
   const BULK_SAFE_AGE_MS = 14 * 24 * 60 * 60 * 1000 - 5 * 60 * 1000;
   const JOB_VERSION = 3;
@@ -30,6 +32,7 @@
     autoResumeTimer: null,
     previewSnapshot: null,
     cleanup: null,
+    unresolvedFailures: new Set(),
   };
   globalThis[RUNTIME_KEY] = runtime;
   storage.autoResumeInterrupted ??= false;
@@ -58,6 +61,7 @@
       permissionSkipped: 0,
       skipped: 0,
       failed: 0,
+      recoveredFailures: 0,
       waitMs: 0,
       resumed: false,
     };
@@ -510,6 +514,8 @@
       this.routes = {};
       this.limitEvents = [];
       this.rateLimits = 0;
+      this.transientErrors = 0;
+      this.recoveredTransientRequests = 0;
       this.headersSeen = 0;
       this.requestCount = 0;
       this.networkMs = {};
@@ -530,7 +536,7 @@
       this.waitUntil = 0;
       this.waitKind = "";
       this.waitStarted = 0;
-      this.waitTotals = { pacing: 0, cooldown: 0, indexing: 0 };
+      this.waitTotals = { pacing: 0, cooldown: 0, indexing: 0, transient: 0 };
       this.indexWaits = 0;
       this.lastSavedAt = 0;
       this.lastSavedLimits = 0;
@@ -702,6 +708,8 @@
         requests: this.requestCount,
         requests_last_1s: requestCountSince(1000), requests_last_60s: requestCountSince(60000), requests_last_3600s: requestCountSince(3600000),
         responses: { ...this.responses }, operations: { ...this.routes }, rate_limits: this.rateLimits,
+        transient_errors: this.transientErrors, recovered_transient_requests: this.recoveredTransientRequests,
+        unresolved_failures: progress.failed, recovered_failures: progress.recoveredFailures ?? 0,
         observed_limits: clone(this.observedLimits),
         average_response_ms: Object.fromEntries(Object.entries(this.networkMs).map(([key, ms]) => [key, Math.round(ms)])),
         in_flight_s: this.inFlightAt ? Math.round((now - this.inFlightAt) / 1000) : 0,
@@ -866,6 +874,7 @@
     async runRequest(identity, kind, fn) {
       let lane = this.lane(identity, kind);
       const resource = this.resource(identity);
+      let transientAttempts = 0;
       for (;;) {
         await this.control.check();
         this.activeLane = lane; this.activeResource = resource;
@@ -912,7 +921,22 @@
             this.persist();
             throw this.control.failure;
           }
-          if (status !== 429) { this.persist(); throw error; }
+          const transient = status >= 500 && status <= 599;
+          if (transient) this.metrics.transientErrors++;
+          if (status !== 429) {
+            if (transient && transientAttempts < TRANSIENT_RETRIES) {
+              transientAttempts++;
+              const retryMs = TRANSIENT_RETRY_BASE_MS * (2 ** (transientAttempts - 1));
+              this.persist();
+              this.metrics.beginWait("transient", Date.now() + retryMs);
+              setProgress({ status: `Discord returned ${status}; retrying automatically (${transientAttempts}/${TRANSIENT_RETRIES})...`, waitMs: retryMs });
+              await this.control.wait(retryMs);
+              this.metrics.endWait();
+              continue;
+            }
+            this.persist();
+            throw error;
+          }
           const ms = pacingRetry(error);
           const body = error?.body ?? error?.response?.body;
           const rawScope = String(responseHeader(error, "X-RateLimit-Scope") ?? "").toLowerCase();
@@ -939,6 +963,7 @@
         resource.success();
         this.metrics.observePace(identity.operation, lane.effectiveDelay());
         lane.nextAt = requestStart + lane.effectiveDelay();
+        if (transientAttempts > 0) this.metrics.recoveredTransientRequests++;
         this.persist();
         this.control.assertAccount();
         return response;
@@ -1082,6 +1107,7 @@
         React.createElement(Txt, null, `Status: ${modeText}`),
         React.createElement(Txt, { style: { marginTop: 7 } }, `Rate limits: ${report.rate_limits} total · ${report.limits_last_10m} in the last 10 minutes`),
         React.createElement(Txt, null, `Failures: ${report.failed}`),
+        (report.transient_errors ?? 0) > 0 ? React.createElement(Txt, null, `Transient server errors: ${report.transient_errors} · recovered by retry: ${report.recovered_transient_requests ?? 0} · recovered later: ${report.recovered_failures ?? 0}`) : null,
         React.createElement(Txt, { style: { fontWeight: "700", marginTop: 9 } }, "What it's doing"),
         React.createElement(Txt, { style: { color: C.muted } }, whatDoing),
       ) : null,
@@ -1850,20 +1876,39 @@
     const code = error?.body?.code ?? error?.response?.body?.code;
     return status === 404 || code === 10008 || code === 10014;
   }
+  function failureTaskKey(kind, item) {
+    return kind === "reaction"
+      ? `reaction:${item.channelId}:${item.messageId}:${item.emoji}:${item.userId ?? "@me"}`
+      : `message:${item.channelId}:${item.messageId}`;
+  }
+  function markTaskFailed(key) {
+    runtime.unresolvedFailures.add(key);
+    setProgress({ failed: runtime.unresolvedFailures.size });
+  }
+  function markTaskResolved(key) {
+    if (!runtime.unresolvedFailures.delete(key)) return;
+    setProgress({
+      failed: runtime.unresolvedFailures.size,
+      recoveredFailures: (progress.recoveredFailures ?? 0) + 1,
+    });
+  }
 
   async function deleteOne(rt, rate, control, message) {
     await control.check();
+    const failureKey = failureTaskKey("message", message);
     try {
       await rate.run(`delete:${message.channelId}`, "modify", () => rt.rest.del({
         url: `/channels/${message.channelId}/messages/${message.messageId}`,
       }));
       rate.metrics.finishTask("delete", 1, true);
       bump({ messagesDeleted: 1 });
+      markTaskResolved(failureKey);
       return true;
     } catch (error) {
       if (error?.purgeStop || control.cancelled) throw error;
       rate.metrics.finishTask("delete", 1);
-      bump(missing(error) ? { skipped: 1 } : { failed: 1 });
+      if (missing(error)) { markTaskResolved(failureKey); bump({ skipped: 1 }); }
+      else markTaskFailed(failureKey);
       return false;
     }
   }
@@ -1951,6 +1996,7 @@
     let index = 0;
     for (const reaction of ordered) {
       await control.check();
+      const failureKey = failureTaskKey("reaction", reaction);
       const encoded = encodeURIComponent(reaction.emoji);
       const specific = !!reaction.userId;
       if (specific) {
@@ -1972,10 +2018,12 @@
         }));
         rate.metrics.finishTask("reaction", 1);
         bump({ reactionsRemoved: 1 });
+        markTaskResolved(failureKey);
       } catch (error) {
         if (error?.purgeStop || control.cancelled) throw error;
         rate.metrics.finishTask("reaction", 1);
-        bump(missing(error) ? { skipped: 1 } : { failed: 1 });
+        if (missing(error)) { markTaskResolved(failureKey); bump({ skipped: 1 }); }
+        else markTaskFailed(failureKey);
       }
     }
   }
@@ -2126,6 +2174,7 @@
 
     const control = new Control();
     runtime.control = control;
+    runtime.unresolvedFailures.clear();
     progress = {
       ...emptyProgress(),
       phase: previewSnapshot ? "purging" : "discovering",
