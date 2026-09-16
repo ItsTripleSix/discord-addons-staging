@@ -1,0 +1,36 @@
+name: Purge Tools smoke test
+
+on:
+  push:
+    paths:
+      - plugins/purge-tools/index.js
+      - clients/shiggycord/plugins/purge-tools/index.js
+      - scripts/purge-tools-smoke.cjs
+      - .github/workflows/purge-tools-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Materialize pinned v1.2.2 base
+        run: git show 10bcce8814bde3565fa3f6074b860c0f926df6cc:plugins/purge-tools/index.js > /tmp/purge-tools-base122.js
+
+      - name: Verify mirrored plugin files
+        run: |
+          cmp plugins/purge-tools/index.js clients/shiggycord/plugins/purge-tools/index.js
+          cmp plugins/purge-tools/manifest.json clients/shiggycord/plugins/purge-tools/manifest.json
+
+      - name: Check outer wrapper syntax
+        run: node --check plugins/purge-tools/index.js
+
+      - name: Generate and parse inner source
+        run: node scripts/purge-tools-smoke.cjs plugins/purge-tools/index.js /tmp/purge-tools-base122.js
