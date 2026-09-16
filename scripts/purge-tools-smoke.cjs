@@ -48,6 +48,27 @@ function parse(source, label) {
   console.log(`${label} syntax PASS (${source.length} bytes)`);
 }
 
+function assertFinalFeatures(source) {
+  const required = [
+    'const PLUGIN_VERSION = "1.2.7-shiggy";',
+    'shared_hard_cap_per_min: 30',
+    'report_version: 3',
+    'Copy report',
+    'Advanced details',
+    'Direct message:',
+    'Waiting for message deletion to finish',
+    'Reaction cleanup will begin automatically afterward.',
+    'shared_bottleneck:',
+    'route_pacing_ms:',
+    'effective_pacing_ms:',
+  ];
+  const missing = required.filter(value => !source.includes(value));
+  if (missing.length) throw new Error(`Flattened final is missing required features: ${missing.join(", ")}`);
+  if (/shiggyPurgeWrapperBase|BASE_URL\s*=|fetchBase\s*\(/.test(source)) {
+    throw new Error("Flattened final still contains a runtime wrapper chain");
+  }
+}
+
 function fixFriendlyBridgeEscaping(source) {
   const before = '  }\\\\n\\\\n  function portSource(source) {';
   const after = '  }\\n\\n  function portSource(source) {';
@@ -59,35 +80,36 @@ function fixFriendlyBridgeEscaping(source) {
 }
 
 const outer = read(wrapperPath);
-parse(outer, "stage0-current-wrapper");
+parse(outer, "stage0-current-plugin");
+
+if (outer.includes('const PLUGIN_VERSION = "1.2.7-shiggy";')) {
+  assertFinalFeatures(outer);
+  console.log("Purge Tools flattened v1.2.7 smoke PASS");
+  process.exit(0);
+}
 
 const patch126 = expose(outer, "patch", "stage0-current-wrapper");
 const stage1 = patch126(read(base122Path));
-fs.writeFileSync("/tmp/purge-tools-stage1.js", stage1);
 parse(stage1, "stage1-v122-wrapper-after-v126");
 
 const patch122 = expose(stage1, "patch", "stage1-v122-wrapper-after-v126");
 const stage2 = patch122(read(base121Path));
-fs.writeFileSync("/tmp/purge-tools-stage2.js", stage2);
 parse(stage2, "stage2-v121-wrapper-after-v122");
 
 const patch121 = expose(stage2, "patch", "stage2-v121-wrapper-after-v122");
 let stage3 = patch121(read(base120Path));
-fs.writeFileSync("/tmp/purge-tools-stage3-before-fix.js", stage3);
 parse(stage3, "stage3-v120-wrapper-after-v121-before-fix");
 stage3 = fixFriendlyBridgeEscaping(stage3);
-fs.writeFileSync("/tmp/purge-tools-stage3.js", stage3);
 parse(stage3, "stage3-v120-wrapper-after-v121-fixed");
 
 const patch120 = expose(stage3, "patchBaseSource", "stage3-v120-wrapper-after-v121-fixed");
 const stage4 = patch120(read(base117Path));
-fs.writeFileSync("/tmp/purge-tools-stage4.js", stage4);
 parse(stage4, "stage4-v117-wrapper-after-v120");
 
 const port117 = expose(stage4, "portSource", "stage4-v117-wrapper-after-v120");
 let stage5 = port117(read(stableCorePath));
 stage5 = stage5.replace('const PLUGIN_VERSION = "1.2.6-shiggy";', 'const PLUGIN_VERSION = "1.2.7-shiggy";');
-if (!stage5.includes('const PLUGIN_VERSION = "1.2.7-shiggy";')) throw new Error("Could not stamp v1.2.7 final version");
+assertFinalFeatures(stage5);
 fs.writeFileSync("/tmp/purge-tools-v127-flat.js", stage5);
 parse(stage5, "stage5-v127-flat-final");
 
